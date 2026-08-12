@@ -1,492 +1,589 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<title>Volleyball Sun — Walkable AR Solar System</title>
-
-<!-- ============================================================
-     LIBRARIES
-     ============================================================ -->
-<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/aframe/build/aframe-ar.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Solar Walk — a true-scale solar system you can walk through</title>
 <style>
   :root{
-    --void:#05070d;
-    --panel:rgba(9,14,24,.82);
-    --hair:rgba(140,190,255,.22);
-    --ink:#e8f0ff;
-    --dim:#7d90ad;
-    --beam:#5fe3ff;
-    --flare:#ffb35c;
+    --ink:#dfe7ef;
+    --dim:#7f93a6;
+    --glass:rgba(9,16,24,.72);
+    --line:rgba(150,190,220,.28);
+    --sun:#ffb454;
+    --live:#5ce6b4;
+    --warn:#ff8f6b;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;height:100%;overflow:hidden;background:var(--void);
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;
     font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--ink)}
-  a-scene{position:fixed;inset:0}
+  #cam,#gl{position:fixed;inset:0;width:100%;height:100%}
+  #cam{object-fit:cover;z-index:0}
+  #gl{z-index:1}
 
-  /* ---------- Launch screen ---------- */
-  #launch{
-    position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;
-    justify-content:center;padding:28px 24px calc(28px + env(safe-area-inset-bottom));
-    background:
-      radial-gradient(120% 70% at 50% 8%, rgba(255,179,92,.20), transparent 60%),
-      radial-gradient(90% 60% at 20% 100%, rgba(95,227,255,.10), transparent 65%),
-      var(--void);
-    overflow-y:auto;
-  }
-  .eyebrow{font-size:11px;letter-spacing:.32em;color:var(--beam);text-transform:uppercase}
-  h1{font-size:clamp(30px,10vw,46px);line-height:.98;margin:14px 0 0;font-weight:700;letter-spacing:-.02em}
-  h1 em{font-style:normal;color:var(--flare)}
-  .lede{color:var(--dim);font-size:13.5px;line-height:1.65;margin:14px 0 0;max-width:44ch}
+  .panel{background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--line)}
 
-  .ledger{margin:26px 0 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
-  .ledger div{display:flex;justify-content:space-between;gap:14px;padding:9px 0;
-    font-size:12px;border-bottom:1px solid rgba(140,190,255,.08)}
-  .ledger div:last-child{border-bottom:0}
-  .ledger span:first-child{color:var(--dim);letter-spacing:.06em}
-  .ledger span:last-child{color:var(--ink);font-variant-numeric:tabular-nums}
-  .ledger b{color:var(--flare);font-weight:600}
+  /* ---------- top readout ---------- */
+  #top{position:fixed;z-index:3;top:env(safe-area-inset-top,0);left:0;right:0;
+    padding:10px 12px;display:flex;gap:12px;align-items:baseline;
+    font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+  #top .k{color:var(--dim)}
+  #fix{margin-left:auto}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warn);
+    vertical-align:middle;margin-right:5px}
+  .dot.ok{background:var(--live);box-shadow:0 0 8px var(--live)}
 
-  button{font:inherit;border:0;cursor:pointer}
-  .cta{width:100%;margin-top:26px;padding:17px 20px;border-radius:2px;
-    background:var(--flare);color:#180c00;font-size:15px;font-weight:700;letter-spacing:.02em}
-  .cta:active{transform:translateY(1px)}
-  .cta[disabled]{opacity:.45}
-  .ghost{width:100%;margin-top:10px;padding:13px;border:1px solid var(--hair);
-    background:transparent;color:var(--dim);font-size:12px;letter-spacing:.12em;text-transform:uppercase}
-  .note{margin-top:16px;font-size:11px;line-height:1.6;color:var(--dim)}
-  .note b{color:var(--beam);font-weight:600}
+  /* ---------- reticle ---------- */
+  #ret{position:fixed;z-index:2;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;
+    pointer-events:none;opacity:.45}
+  #ret:before,#ret:after{content:"";position:absolute;background:var(--ink)}
+  #ret:before{left:50%;top:0;bottom:0;width:1px}
+  #ret:after{top:50%;left:0;right:0;height:1px}
 
-  /* ---------- In-AR HUD ---------- */
-  #hud{position:fixed;inset:0;z-index:20;display:none;pointer-events:none}
-  #readout{
-    position:absolute;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));
-    background:var(--panel);border:1px solid var(--hair);border-radius:2px;
-    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-    padding:9px 11px;font-size:11px;line-height:1.55;pointer-events:auto
-  }
-  #readout .row{display:flex;justify-content:space-between;gap:10px}
-  #readout .k{color:var(--dim);letter-spacing:.1em}
-  #readout .v{font-variant-numeric:tabular-nums}
-  #targets{margin-top:8px;border-top:1px solid rgba(140,190,255,.14);padding-top:7px;
-    max-height:34vh;overflow-y:auto}
-  #targets .t{display:flex;justify-content:space-between;gap:8px;padding:2.5px 0}
-  #targets .t i{font-style:normal;display:inline-block;width:7px;height:7px;border-radius:50%;
-    margin-right:7px;vertical-align:1px}
-  #targets .t b{font-weight:600;letter-spacing:.05em}
-  #targets .t span{color:var(--dim);font-variant-numeric:tabular-nums}
+  /* ---------- bottom rail ---------- */
+  #rail{position:fixed;z-index:3;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0) + 0px)}
+  #targets{display:flex;gap:8px;overflow-x:auto;padding:10px 12px;scrollbar-width:none}
+  #targets::-webkit-scrollbar{display:none}
+  .chip{flex:0 0 auto;padding:7px 11px;border-radius:2px;font-size:11px;white-space:nowrap;
+    background:var(--glass);border:1px solid var(--line);color:var(--ink);letter-spacing:.04em}
+  .chip b{font-weight:600}
+  .chip .d{color:var(--dim);margin-left:7px}
+  .chip.on{border-color:var(--sun);color:var(--sun)}
+  #bar{display:flex;gap:1px;border-top:1px solid var(--line)}
+  #bar button{flex:1;padding:14px 4px;font:inherit;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;background:var(--glass);border:0;color:var(--ink)}
+  #bar button:active{color:var(--sun)}
 
-  #tray{position:absolute;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));
-    display:flex;gap:7px;pointer-events:auto}
-  #tray button{flex:1;padding:12px 4px;border:1px solid var(--hair);border-radius:2px;
-    background:var(--panel);color:var(--ink);font-size:10.5px;letter-spacing:.08em;
-    text-transform:uppercase;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-  #tray button.off{color:var(--dim);opacity:.55}
+  /* ---------- guide arrow ---------- */
+  #guide{position:fixed;z-index:2;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:120px;height:120px;pointer-events:none;display:none}
+  #guide svg{width:100%;height:100%;overflow:visible}
 
-  #toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-    background:var(--panel);border:1px solid var(--hair);padding:14px 18px;border-radius:2px;
-    font-size:12px;text-align:center;max-width:80vw;line-height:1.6;display:none}
-  .err{color:#ff9b8a}
+  /* ---------- sheets ---------- */
+  .sheet{position:fixed;z-index:5;inset:auto 0 0 0;max-height:82vh;overflow:auto;
+    padding:18px 18px calc(env(safe-area-inset-bottom,0) + 24px);display:none}
+  .sheet.open{display:block}
+  .sheet h2{margin:0 0 14px;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--sun);font-weight:600}
+  .row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid rgba(150,190,220,.12);font-size:12px}
+  .row label{flex:1;color:var(--dim)}
+  .row output{min-width:66px;text-align:right;font-variant-numeric:tabular-nums}
+  input[type=range]{flex:1.4;accent-color:var(--sun);background:transparent}
+  input[type=text],input[type=datetime-local]{flex:1.4;background:rgba(0,0,0,.45);border:1px solid var(--line);
+    color:var(--ink);font:inherit;font-size:12px;padding:6px 8px;border-radius:2px;min-width:0}
+  .sheet button.act{width:100%;margin-top:14px;padding:13px;font:inherit;font-size:11px;letter-spacing:.1em;
+    text-transform:uppercase;background:transparent;border:1px solid var(--sun);color:var(--sun);border-radius:2px}
+  .note{font-size:11px;line-height:1.65;color:var(--dim);margin:14px 0 0}
+  .close{position:absolute;top:14px;right:16px;font-size:16px;color:var(--dim);background:none;border:0}
+
+  /* ---------- intro ---------- */
+  #intro{position:fixed;inset:0;z-index:9;background:#050a10;display:flex;flex-direction:column;
+    justify-content:center;padding:34px 30px}
+  #intro h1{font-size:26px;line-height:1.15;margin:0 0 6px;font-weight:600;letter-spacing:-.01em}
+  #intro .sub{color:var(--sun);font-size:11px;letter-spacing:.22em;text-transform:uppercase;margin-bottom:26px}
+  #intro p{font-size:12.5px;line-height:1.7;color:var(--dim);margin:0 0 10px;max-width:34em}
+  #intro .tbl{margin:18px 0;font-size:12px;color:var(--ink);border-top:1px solid var(--line)}
+  #intro .tbl div{display:flex;padding:6px 0;border-bottom:1px solid rgba(150,190,220,.12)}
+  #intro .tbl span:first-child{flex:1;color:var(--dim)}
+  #intro .tbl span+span{font-variant-numeric:tabular-nums}
+  #go{margin-top:24px;padding:16px;font:inherit;font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    background:var(--sun);color:#0a0f16;border:0;border-radius:2px;font-weight:600}
+  #err{position:fixed;z-index:10;left:12px;right:12px;bottom:24px;padding:12px;font-size:12px;
+    color:var(--warn);display:none}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 
-<!-- ============================================================ LAUNCH ============================================================ -->
-<div id="launch">
-  <p class="eyebrow">Heliocentric · true scale · live ephemeris</p>
-  <h1>The Sun is a <em>volleyball</em>.</h1>
-  <p class="lede">Everything else follows from that one decision. Shrink the real Sun to 21&nbsp;cm and the whole
-     solar system becomes a thing you can walk across — planets reduced to grains of sand, orbits measured
-     in city blocks. Placed at your feet, in their real positions, right now.</p>
+<video id="cam" playsinline autoplay muted></video>
+<canvas id="gl"></canvas>
+<div id="ret"></div>
+<div id="guide"><svg viewBox="-60 -60 120 120"><circle r="52" fill="none" stroke="rgba(255,180,84,.35)" stroke-width="1"/><path id="gp" d="M0,-52 L7,-40 L-7,-40 Z" fill="#ffb454"/></svg></div>
 
-  <div class="ledger" id="ledger"></div>
-
-  <button class="cta" id="btnPlace">Place Sun at My Location</button>
-  <button class="ghost" id="btnSim">Preview without GPS (desktop)</button>
-
-  <p class="note">
-    Needs <b>HTTPS</b>, an outdoor sky view, and permission for <b>camera</b>, <b>location</b> and
-    <b>motion&nbsp;&amp;&nbsp;orientation</b>.
-  </p>
-  <p class="note" id="launchErr"></p>
+<div id="top" class="">
+  <span><span class="k">Sun</span> <b id="sunsize">21 cm</b></span>
+  <span><span class="k">1 AU</span> <b id="auout">22.6 m</b></span>
+  <span id="fix"><span class="dot" id="fixdot"></span><span id="fixtxt">no fix</span></span>
 </div>
 
-<!-- ============================================================ HUD ============================================================ -->
-<div id="hud">
-  <div id="readout">
-    <div class="row"><span class="k">SCALE</span><span class="v" id="rScale">—</span></div>
-    <div class="row"><span class="k">EPHEMERIS</span><span class="v" id="rEph">—</span></div>
-    <div class="row"><span class="k">GPS FIX</span><span class="v" id="rFix">acquiring…</span></div>
-    <div id="targets"></div>
+<div id="rail">
+  <div id="targets"></div>
+  <div id="bar">
+    <button id="btnAnchor">Sun here</button>
+    <button id="btnAlign">Align</button>
+    <button id="btnSet">Settings</button>
   </div>
-  <div id="tray">
-    <button id="tOrbits">Orbits</button>
-    <button id="tHalos">Halos</button>
-    <button id="tRecentre">Re-place Sun</button>
-  </div>
-  <div id="toast"></div>
 </div>
 
-<script>
-/* ==================================================================
-   1. SCALE MATHEMATICS
-   ================================================================== */
-const SUN_DIAMETER_KM        = 1392700;
-const TARGET_SUN_DIAMETER_M  = 0.21;
-const SCALE                  = TARGET_SUN_DIAMETER_M / (SUN_DIAMETER_KM * 1000); 
-const AU_KM                  = 149597870.7;
-const M_PER_AU               = AU_KM * 1000 * SCALE;   
+<div id="sheet" class="sheet panel">
+  <button class="close" id="close">✕</button>
+  <h2>Settings</h2>
+  <div class="row"><label>Sun diameter</label><input type="range" id="sSun" min="0.05" max="1" step="0.005" value="0.21"><output id="oSun">21 cm</output></div>
+  <div class="row"><label>Model height</label><input type="range" id="sPlane" min="0" max="2" step="0.05" value="1.4"><output id="oPlane">1.40 m</output></div>
+  <div class="row"><label>Eye height</label><input type="range" id="sEye" min="1" max="2.1" step="0.01" value="1.60"><output id="oEye">1.60 m</output></div>
+  <div class="row"><label>Heading trim</label><input type="range" id="sHead" min="-180" max="180" step="0.5" value="0"><output id="oHead">0°</output></div>
+  <div class="row"><label>Beacon size</label><input type="range" id="sBeac" min="0" max="3" step="0.1" value="1"><output id="oBeac">1.0</output></div>
+  <div class="row"><label>Sun latitude</label><input type="text" id="iLat" placeholder="—"></div>
+  <div class="row"><label>Sun longitude</label><input type="text" id="iLon" placeholder="—"></div>
+  <div class="row"><label>Date &amp; time</label><input type="datetime-local" id="iDate"></div>
+  <button class="act" id="btnLive">Return to live time</button>
+  <button class="act" id="btnLink">Copy link to this Sun</button>
+  <p class="note">Anchor accuracy is limited by your phone's GPS, roughly ±5 m. Jupiter and beyond land reliably; the inner four are approximate. Set the anchor while standing still with a clear view of the sky, and give it thirty seconds to settle.</p>
+  <p class="note">Heading trim corrects a mis-calibrated compass. Stand at the Sun, point the phone at a landmark whose true bearing you know, and drag until it lines up. Or walk to where you believe a planet is and tap Align while aiming at it.</p>
+</div>
 
-/* ---- Tunables ---- */
-const CFG = {
-  PLANET_Y      : 1.6,    // planets at eye height so they sit on the horizon line
-  ORBIT_Y       : 0.05,   // orbit rings hug the ground
-  HALO_DIAM     : 0.5,    // base halo diameter (m) before angular compensation
-  HALO_REF_DIST : 14,     // distance (m) at which halo renders at base size
-  HALO_MAX      : 45,     // clamp so Neptune's halo doesn't eat the sky
-  BEACON_H      : 3.0,    // vertical finder column height (m) before compensation
-  SUN_OFFSET_N  : 3,      // <-- CHANGE THIS: Pushes the Sun 3 meters in front of you
-  FLATTEN       : false   // true = force all planets onto one flat plane, ignoring inclination
-};
+<div id="intro">
+  <div class="sub">Solar Walk</div>
+  <h1>One volleyball Sun,<br>seven hundred metres of sky.</h1>
+  <p>Plant the Sun at your feet. Every planet is placed at its real position for right now, at one scale, on real ground. Walk to Jupiter. It takes a while — that is the point.</p>
+  <div class="tbl" id="introtbl"></div>
+  <p>Needs camera, location and motion permission. Works outdoors, in daylight, with room to walk.</p>
+  <button id="go">Begin</button>
+</div>
+<div id="err"></div>
 
-const PLANETS = [
-  { name:'Mercury', body:'Mercury', dKm:  4879, a:0.38710, color:'#a89a8c', L0:252.25, P:   87.969 },
-  { name:'Venus',   body:'Venus',   dKm: 12104, a:0.72333, color:'#e8cf9e', L0:181.98, P:  224.701 },
-  { name:'Earth',   body:'Earth',   dKm: 12756, a:1.00000, color:'#4f9ff0', L0:100.46, P:  365.256 },
-  { name:'Mars',    body:'Mars',    dKm:  6792, a:1.52371, color:'#d9603b', L0:355.43, P:  686.980 },
-  { name:'Jupiter', body:'Jupiter', dKm:142984, a:5.20289, color:'#d8a86a', L0: 34.35, P: 4332.589 },
-  { name:'Saturn',  body:'Saturn',  dKm:120536, a:9.53667, color:'#e6d6a8', L0: 50.08, P:10759.220 },
-  { name:'Uranus',  body:'Uranus',  dKm: 51118, a:19.18916,color:'#93d8e8', L0:314.06, P:30685.400 },
-  { name:'Neptune', body:'Neptune', dKm: 49528, a:30.06992,color:'#5b78f0', L0:304.35, P:60189.000 }
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ══════════════════════════════════════════════════════════════════
+   1. ASTRONOMY
+   Keplerian elements, JPL "Approximate Positions of the Major
+   Planets", valid 1800–2050. Angles in degrees, a in AU.
+   ══════════════════════════════════════════════════════════════════ */
+const AU_M = 1.495978707e11;
+const SUN_DIA_M = 1.3927e9;
+
+//            a, da,  e, de,  I, dI,  L, dL,  peri, dperi,  node, dnode
+const BODIES = [
+ {n:'Mercury', dia:4879,   col:0x9a8b7c, e:[0.38709927,0.00000037, 0.20563593,0.00001906, 7.00497902,-0.00594749, 252.25032350,149472.67411175, 77.45779628,0.16047689, 48.33076593,-0.12534081]},
+ {n:'Venus',   dia:12104,  col:0xd9b88a, e:[0.72333566,0.00000390, 0.00677672,-0.00004107, 3.39467605,-0.00078890, 181.97909950,58517.81538729, 131.60246718,0.00268329, 76.67984255,-0.27769418]},
+ {n:'Earth',   dia:12756,  col:0x5b9ede, e:[1.00000261,0.00000562, 0.01671123,-0.00004392,-0.00001531,-0.01294668, 100.46457166,35999.37244981, 102.93768193,0.32327364, 0.0,0.0]},
+ {n:'Mars',    dia:6792,   col:0xc1603d, e:[1.52371034,0.00001847, 0.09339410,0.00007882, 1.84969142,-0.00813131, -4.55343205,19140.30268499, -23.94362959,0.44441088, 49.55953891,-0.29257343]},
+ {n:'Jupiter', dia:142984, col:0xd8b48c, e:[5.20288700,-0.00011607, 0.04838624,-0.00013253, 1.30439695,-0.00183714, 34.39644051,3034.74612775, 14.72847983,0.21252668, 100.47390909,0.20469106]},
+ {n:'Saturn',  dia:120536, col:0xe0cd9a, e:[9.53667594,-0.00125060, 0.05386179,-0.00050991, 2.48599187,0.00193609, 49.95424423,1222.49362201, 92.59887831,-0.41897216, 113.66242448,-0.28867794]},
+ {n:'Uranus',  dia:51118,  col:0x9fd8e0, e:[19.18916464,-0.00196176, 0.04725744,-0.00004397, 0.77263783,-0.00242939, 313.23810451,428.48202785, 170.95427630,0.40805281, 74.01692503,0.04240589]},
+ {n:'Neptune', dia:49528,  col:0x5f7fd4, e:[30.06992276,0.00026291, 0.00859048,0.00005105, 1.77004347,0.00035372, -55.12002969,218.45945325, 44.96476227,-0.32241464, 131.78422574,-0.00508664]},
+ {n:'Pluto',   dia:2376,   col:0xb8a898, e:[39.48211675,-0.00031596, 0.24882730,0.00005170, 17.14001206,0.00004818, 238.92903833,145.20780515, 224.06891629,-0.04062942, 110.30393684,-0.01183482]}
 ];
 
-const scaledRadius = p => (p.dKm * 1000 * SCALE) / 2;   
-const fmtM = m => m < 1 ? (m*1000).toFixed(m*1000 < 10 ? 2 : 1) + ' mm'
-                        : m < 1000 ? m.toFixed(m < 10 ? 2 : 1) + ' m'
-                                   : (m/1000).toFixed(2) + ' km';
+const D2R = Math.PI/180;
+const J2000 = Date.UTC(2000,0,1,12,0,0);
+const centuries = d => (d.getTime()-J2000)/86400000/36525;
 
-/* ==================================================================
-   2. REAL-TIME ASTRONOMY
-   ================================================================== */
-const OBLIQUITY = 23.4392911 * Math.PI / 180;
-let ephemerisSource = 'unavailable';
-
-function heliocentricAU(p, date){
-  if (window.Astronomy && Astronomy.HelioVector && Astronomy.Body && Astronomy.Body[p.body]){
-    try{
-      const v = Astronomy.HelioVector(Astronomy.Body[p.body], date); 
-      ephemerisSource = 'astronomy-engine';
-      return {
-        x:  v.x,
-        y:  v.y * Math.cos(OBLIQUITY) + v.z * Math.sin(OBLIQUITY),
-        z: -v.y * Math.sin(OBLIQUITY) + v.z * Math.cos(OBLIQUITY)
-      };
-    }catch(e){ console.warn('HelioVector failed for ' + p.name, e); }
+function kepler(M,e){
+  let E = M + e*Math.sin(M);
+  for(let i=0;i<10;i++){
+    const dE = (E - e*Math.sin(E) - M)/(1 - e*Math.cos(E));
+    E -= dE; if(Math.abs(dE)<1e-11) break;
   }
-  ephemerisSource = 'mean-longitude fallback';
-  const days = (date - Date.UTC(2000,0,1,12,0,0)) / 86400000;
-  const L = (p.L0 + 360 * days / p.P) * Math.PI / 180;
-  return { x: p.a * Math.cos(L), y: p.a * Math.sin(L), z: 0 };
+  return E;
 }
-
-/* Metres east/north/up of the Sun, at model scale. */
-function planetOffset(p, date){
-  const v = heliocentricAU(p, date);
-  return {
-    east : v.x * M_PER_AU,
-    north: v.y * M_PER_AU,
-    up   : CFG.FLATTEN ? 0 : v.z * M_PER_AU,
-    r    : Math.hypot(v.x, v.y, v.z) * M_PER_AU
-  };
-}
-
-/* ==================================================================
-   3. CUSTOM A-FRAME COMPONENTS
-   ================================================================== */
-AFRAME.registerComponent('angular-scale', {
-  schema:{ ref:{default:CFG.HALO_REF_DIST}, min:{default:1}, max:{default:CFG.HALO_MAX} },
-  init(){ this._a = new THREE.Vector3(); this._b = new THREE.Vector3(); this._t = 999; },
-  tick(t, dt){
-    this._t += dt || 16; if (this._t < 200) return; this._t = 0;
-    const cam = this.el.sceneEl.camera; if (!cam) return;
-    this.el.object3D.getWorldPosition(this._a);
-    cam.getWorldPosition(this._b);
-    const s = THREE.MathUtils.clamp(this._a.distanceTo(this._b) / this.data.ref,
-                                    this.data.min, this.data.max);
-    this.el.object3D.scale.set(s, s, s);
-  }
-});
-
-AFRAME.registerComponent('billboard', {
-  init(){ this._p = new THREE.Vector3(); this._c = new THREE.Vector3(); },
-  tick(){
-    const cam = this.el.sceneEl.camera; if (!cam) return;
-    this.el.object3D.getWorldPosition(this._p);
-    cam.getWorldPosition(this._c);
-    this._c.y = this._p.y;                    
-    this.el.object3D.lookAt(this._c);
-    this.el.object3D.rotateY(Math.PI);        
-  }
-});
-
-/* ==================================================================
-   4. SCENE CONSTRUCTION (Completely updated to bypass GPS Math Bugs)
-   ================================================================== */
-const $ = id => document.getElementById(id);
-const el = (tag, attrs) => { const e = document.createElement(tag);
-  for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
-
-let sceneEl = null;
-let orbitsOn = true, halosOn = true, simMode = false;
-const targets = [];   
-
-function buildScene(lat, lon){
-  if (sceneEl){ sceneEl.parentNode.removeChild(sceneEl); sceneEl = null; targets.length = 0; }
-  const now = new Date();
-
-  sceneEl = el('a-scene', {
-    'vr-mode-ui'                      : 'enabled: false',
-    'device-orientation-permission-ui': 'enabled: false',
-    'embedded'                        : '',
-    'arjs'    : 'sourceType: webcam; videoTexture: true; debugUIEnabled: false',
-    'renderer': 'antialias: true; alpha: true; logarithmicDepthBuffer: true; colorManagement: true; sortObjects: true'
-  });
-
-  /* ---- Camera ---- */
-  const camAttrs = {
-    'gps-new-camera': (simMode
-        ? `simulateLatitude: ${lat}; simulateLongitude: ${lon}; `
-        : '') + 'gpsMinDistance: 1; alert: false',
-    'camera'   : 'near: 0.01; far: 60000',
-    'position' : '0 1.6 0',
-    'rotation-reader': ''
-  };
-  const cam = el('a-camera', camAttrs);
-  cam.addEventListener('gps-camera-update-position', e => {
-    const acc = e.detail && e.detail.position && e.detail.position.accuracy;
-    $('rFix').textContent = acc ? '±' + acc.toFixed(0) + ' m' : 'locked';
-  });
-  sceneEl.appendChild(cam);
-
-  /* ---- Sun (Anchored at exact center of the world / user location) ---- */
-  const sunNode = el('a-entity', {
-    id: 'sun',
-    position: `0 0 ${-CFG.SUN_OFFSET_N}` 
-  });
-
-  const sunGroup = el('a-entity', { position: `0 ${CFG.PLANET_Y} 0` });
-  sunGroup.appendChild(el('a-sphere', {
-    radius  : TARGET_SUN_DIAMETER_M / 2,
-    material: `shader: standard; color: #fff3d0; emissive: #ffb03a; emissiveIntensity: 1.4; roughness: 1; metalness: 0`
-  }));
-  sunGroup.appendChild(el('a-sphere', {   
-    radius  : TARGET_SUN_DIAMETER_M * 1.6,
-    material: 'shader: flat; color: #ffb35c; opacity: 0.16; transparent: true; side: double; depthWrite: false'
-  }));
-  sunGroup.appendChild(makeLabel('SUN', 'volleyball · 21 cm', '#ffb35c', 0.42));
-  sunNode.appendChild(sunGroup);
-
-  /* ---- Orbit rings ---- */
-  const orbits = el('a-entity', { id: 'orbits', position: `0 ${CFG.ORBIT_Y} 0` });
-  PLANETS.forEach(p => {
-    const r = p.a * M_PER_AU;
-    const w = THREE.MathUtils.clamp(r * 0.002, 0.04, 0.9);
-    orbits.appendChild(el('a-entity', {
-      geometry : `primitive: ring; radiusInner: ${r - w}; radiusOuter: ${r + w}; segmentsTheta: 256`,
-      material : `shader: flat; color: ${p.color}; opacity: 0.30; transparent: true; side: double; depthWrite: false`,
-      rotation : '-90 0 0'
-    }));
-  });
-  sunNode.appendChild(orbits);
-  sceneEl.appendChild(sunNode);
-  targets.push({ name:'Sun', color:'#ffb35c', node:sunGroup, rFromSun:0 });
-
-  /* ---- Planets ---- */
-  PLANETS.forEach(p => {
-    const o = planetOffset(p, now);
-    
-    // Position planets using true 3D meters, side-stepping AR.js GPS projection flaws
-    const node = el('a-entity', { position: `${o.east} 0 ${-o.north - CFG.SUN_OFFSET_N}` });
-    const group = el('a-entity', { position: `0 ${CFG.PLANET_Y + o.up} 0` });
-
-    group.appendChild(el('a-sphere', {
-      radius   : scaledRadius(p),
-      'segments-width': 24, 'segments-height': 16,
-      material : `shader: standard; color: ${p.color}; emissive: ${p.color}; emissiveIntensity: 0.55; roughness: 0.9`
-    }));
-
-    const boost = el('a-entity', { 'angular-scale': `ref: ${CFG.HALO_REF_DIST}`, class: 'boost' });
-    boost.appendChild(el('a-sphere', {
-      radius   : CFG.HALO_DIAM / 2,
-      material : `shader: flat; color: ${p.color}; opacity: 0.22; transparent: true; side: double; depthWrite: false`
-    }));
-    boost.appendChild(el('a-cylinder', {   
-      radius   : 0.012, height: CFG.BEACON_H, position: `0 ${CFG.BEACON_H/2} 0`,
-      material : `shader: flat; color: ${p.color}; opacity: 0.13; transparent: true; depthWrite: false`
-    }));
-    boost.appendChild(makeLabel(p.name.toUpperCase(),
-      `${fmtM(scaledRadius(p)*2)} wide · ${fmtM(o.r)} out`, p.color, 0.46));
-    group.appendChild(boost);
-
-    node.appendChild(group);
-    sceneEl.appendChild(node);
-    targets.push({ name:p.name, color:p.color, node:group, rFromSun:o.r });
-  });
-
-  document.body.appendChild(sceneEl);
-
-  $('launch').style.display = 'none';
-  $('hud').style.display    = 'block';
-  $('rScale').textContent   = '1 : ' + Math.round(1/SCALE).toLocaleString();
-  $('rEph').textContent     = ephemerisSource;
-  if (simMode) $('rFix').textContent = 'simulated';
-  renderTargetList();
-}
-
-function makeLabel(title, sub, color, y){
-  const wrap = el('a-entity', { position: `0 ${y} 0`, billboard: '' });
-  wrap.appendChild(el('a-text', {
-    value:title, align:'center', color:color, width:2.4, position:'0 0.10 0',
-    'letter-spacing':6, 'shader':'msdf', 'side':'double'
-  }));
-  wrap.appendChild(el('a-text', {
-    value:sub, align:'center', color:'#c6d5ea', width:1.5, opacity:0.8,
-    position:'0 -0.03 0', 'side':'double'
-  }));
-  return wrap;
-}
-
-const _v = new THREE.Vector3(), _c = new THREE.Vector3();
-function renderTargetList(){
-  if (!sceneEl || !targets.length) return;
-  const cam = sceneEl.camera;
-  const rows = targets.map(t => {
-    let d = null;
-    if (cam && t.node.object3D){
-      t.node.object3D.getWorldPosition(_v); cam.getWorldPosition(_c);
-      d = _v.distanceTo(_c);
-    }
-    return { ...t, d };
-  }).sort((a,b) => (a.d ?? 1e12) - (b.d ?? 1e12));
-
-  $('targets').innerHTML = rows.map(r =>
-    `<div class="t"><b><i style="background:${r.color}"></i>${r.name}</b>` +
-    `<span>${r.d == null ? '—' : fmtM(r.d) + ' away'}</span></div>`
-  ).join('');
-}
-setInterval(renderTargetList, 1200);
-
-/* ==================================================================
-   5. PERMISSIONS + LAUNCH FLOW
-   ================================================================== */
-function toast(msg, ms){
-  const t = $('toast'); t.innerHTML = msg; t.style.display = 'block';
-  clearTimeout(toast._h); if (ms !== 0) toast._h = setTimeout(() => t.style.display='none', ms || 3200);
-}
-function launchError(msg){
-  $('launchErr').innerHTML = '<span class="err">' + msg + '</span>';
-  $('btnPlace').disabled = false;
-  $('btnPlace').textContent = 'Place Sun at My Location';
-}
-
-async function requestMotion(){
-  const ask = async C => {
-    if (typeof C !== 'undefined' && typeof C.requestPermission === 'function'){
-      const r = await C.requestPermission();
-      if (r !== 'granted') throw new Error('Motion & orientation access was denied. Enable it in Settings → Safari → Motion & Orientation Access, then reload.');
-    }
-  };
-  await ask(window.DeviceOrientationEvent);
-  try { await ask(window.DeviceMotionEvent); } catch(_){}
-}
-
-async function primeCamera(){
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
-    throw new Error('This browser has no camera API. Use Safari on iOS or Chrome on Android, over HTTPS.');
-  const s = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } }, audio:false });
-  s.getTracks().forEach(t => t.stop());   
-  await new Promise(r => setTimeout(r, 250));
-}
-
-function getFix(){
-  return new Promise((res, rej) => {
-    if (!navigator.geolocation) return rej(new Error('This browser has no geolocation API.'));
-    navigator.geolocation.getCurrentPosition(
-      p => res(p.coords),
-      e => rej(new Error({
-        1:'Location access was denied. Allow it for this site and try again.',
-        2:'No position available. Step outside for a clear view of the sky.',
-        3:'Location request timed out. Try again with a clearer sky view.'
-      }[e.code] || e.message)),
-      { enableHighAccuracy:true, timeout:20000, maximumAge:0 }
-    );
-  });
-}
-
-$('btnPlace').addEventListener('click', async () => {
-  const b = $('btnPlace'); b.disabled = true; $('launchErr').textContent = '';
-  try{
-    b.textContent = 'Requesting sensors…';   await requestMotion();
-    b.textContent = 'Requesting camera…';    await primeCamera();
-    b.textContent = 'Getting a GPS fix…';    const c = await getFix();
-    b.textContent = 'Placing the Sun…';
-    simMode = false;
-    buildScene(c.latitude, c.longitude);
-    toast(`Sun anchored at ${c.latitude.toFixed(6)}, ${c.longitude.toFixed(6)}<br>` +
-          `Fix accurate to ±${(c.accuracy||0).toFixed(0)} m.<br>` +
-          `Turn slowly and look for the coloured halos.`, 5200);
-  }catch(err){
-    console.error(err); launchError(err.message || String(err));
-  }
-});
-
-$('btnSim').addEventListener('click', () => {
-  simMode = true;
-  buildScene(-6.9175, 107.6191);   
-  toast('Preview mode: simulated GPS, no live sensors.', 3600);
-});
-
-$('tOrbits').addEventListener('click', e => {
-  orbitsOn = !orbitsOn;
-  const o = sceneEl && sceneEl.querySelector('#orbits');
-  if (o) o.setAttribute('visible', orbitsOn);
-  e.currentTarget.classList.toggle('off', !orbitsOn);
-});
-$('tHalos').addEventListener('click', e => {
-  halosOn = !halosOn;
-  sceneEl && sceneEl.querySelectorAll('.boost').forEach(n => n.setAttribute('visible', halosOn));
-  e.currentTarget.classList.toggle('off', !halosOn);
-});
-$('tRecentre').addEventListener('click', async () => {
-  toast('Getting a fresh GPS fix…', 0);
-  try{ const c = await getFix(); buildScene(c.latitude, c.longitude);
-       toast('Sun re-placed. Ephemeris refreshed to now.', 3000); }
-  catch(err){ toast('<span class="err">' + err.message + '</span>', 4200); }
-});
-
-/* ==================================================================
-   6. LAUNCH-SCREEN LEDGER 
-   ================================================================== */
-(function ledger(){
-  const earth = PLANETS[2], nep = PLANETS[7];
-  const rows = [
-    ['Sun diameter',        `1,392,700 km → <b>${(TARGET_SUN_DIAMETER_M*100).toFixed(0)} cm</b>`],
-    ['Scale factor',        `1 : ${Math.round(1/SCALE).toLocaleString()}`],
-    ['1 astronomical unit', `${M_PER_AU.toFixed(2)} m`],
-    ['Earth',               `${fmtM(scaledRadius(earth)*2)} wide, ${fmtM(earth.a*M_PER_AU)} out`],
-    ['Neptune',             `${fmtM(scaledRadius(nep)*2)} wide, ${fmtM(nep.a*M_PER_AU)} out`],
-    ['Walk to the edge',    `about ${Math.round(nep.a*M_PER_AU/80)} min`]
+// orbital plane → heliocentric ecliptic J2000
+function toEcliptic(xo,yo,argp,inc,node){
+  const cw=Math.cos(argp),sw=Math.sin(argp),cO=Math.cos(node),sO=Math.sin(node),
+        ci=Math.cos(inc),si=Math.sin(inc);
+  return [
+    (cw*cO - sw*sO*ci)*xo + (-sw*cO - cw*sO*ci)*yo,
+    (cw*sO + sw*cO*ci)*xo + (-sw*sO + cw*cO*ci)*yo,
+    (sw*si)*xo + (cw*si)*yo
   ];
-  $('ledger').innerHTML = rows.map(([k,v]) =>
-    `<div><span>${k}</span><span>${v}</span></div>`).join('');
-  if (!window.Astronomy) $('launchErr').innerHTML =
-    '<span class="err">astronomy-engine did not load — positions will use the built-in approximation.</span>';
+}
+function elementsAt(b,T){
+  const E=b.e;
+  return {a:E[0]+E[1]*T, ecc:E[2]+E[3]*T, inc:(E[4]+E[5]*T)*D2R,
+          L:E[6]+E[7]*T, peri:E[8]+E[9]*T, node:(E[10]+E[11]*T)*D2R};
+}
+function heliocentric(b,T){
+  const el = elementsAt(b,T);
+  let M = el.L - el.peri; M = ((M+180)%360+360)%360-180;
+  const Ea = kepler(M*D2R, el.ecc);
+  const xo = el.a*(Math.cos(Ea)-el.ecc);
+  const yo = el.a*Math.sqrt(1-el.ecc*el.ecc)*Math.sin(Ea);
+  return toEcliptic(xo,yo,(el.peri*D2R)-el.node,el.inc,el.node);
+}
+function orbitPath(b,T,steps=320){
+  const el = elementsAt(b,T), pts=[], argp=(el.peri*D2R)-el.node;
+  for(let i=0;i<=steps;i++){
+    const Ea = i/steps*Math.PI*2;
+    const xo = el.a*(Math.cos(Ea)-el.ecc);
+    const yo = el.a*Math.sqrt(1-el.ecc*el.ecc)*Math.sin(Ea);
+    pts.push(toEcliptic(xo,yo,argp,el.inc,el.node));
+  }
+  return pts;
+}
+// Low-precision Moon (Meeus, ~0.3° — far below our resolution at this scale)
+function moonGeocentric(date){
+  const d = (date.getTime()-J2000)/86400000;
+  const Lp=(218.316+13.176396*d)*D2R, M=(134.963+13.064993*d)*D2R, F=(93.272+13.229350*d)*D2R;
+  const lon = Lp + 6.289*D2R*Math.sin(M);
+  const lat = 5.128*D2R*Math.sin(F);
+  const r   = (385001 - 20905*Math.cos(M))*1000/AU_M;   // AU
+  return [r*Math.cos(lat)*Math.cos(lon), r*Math.cos(lat)*Math.sin(lon), r*Math.sin(lat)];
+}
+
+/* Ecliptic → world.  X_ecl→North, Y_ecl→West, Z_ecl→Up.
+   World is three.js standard: +x East, +y Up, +z South.            */
+const eclToWorld = (p,s) => new THREE.Vector3(-p[1]*s, p[2]*s, -p[0]*s);
+
+/* ══════════════════════════════════════════════════════════════════
+   2. STATE
+   ══════════════════════════════════════════════════════════════════ */
+const q = new URLSearchParams(location.search);
+const S = {
+  sunDia:   +(q.get('sun')  ?? 0.21),
+  plane:    +(q.get('h')    ?? 1.4),
+  eye:      +(q.get('eye')  ?? 1.60),
+  headTrim: +(q.get('trim') ?? 0),
+  beacon:   1,
+  origin:   q.get('lat') && q.get('lon') ? {lat:+q.get('lat'), lon:+q.get('lon')} : null,
+  live:     true,
+  date:     new Date(),
+  gps:      null, acc:null,
+  target:   null,
+  hasOrient:false
+};
+const scaleOf = () => S.sunDia / SUN_DIA_M;
+const auMeters = () => AU_M * scaleOf();
+const fmt = m => m<1 ? (m*1000).toFixed(1)+' mm' : m<100 ? m.toFixed(1)+' m' : (m/1000).toFixed(2)+' km';
+const fmtDia = m => m<0.01 ? (m*1000).toFixed(2)+' mm' : (m*100).toFixed(1)+' cm';
+
+/* ══════════════════════════════════════════════════════════════════
+   3. THREE.JS SCENE
+   ══════════════════════════════════════════════════════════════════ */
+const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('gl'),alpha:true,antialias:true,logarithmicDepthBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(65, 1, 0.004, 8000);
+scene.add(new THREE.AmbientLight(0xffffff,0.45));
+const sunLight = new THREE.PointLight(0xfff0d8, 3, 0, 0);
+scene.add(sunLight);
+
+const sunMesh = new THREE.Mesh(new THREE.SphereGeometry(1,48,32),
+  new THREE.MeshBasicMaterial({color:0xffcb70}));
+scene.add(sunMesh);
+const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex(),color:0xffb454,transparent:true,opacity:.55,depthWrite:false}));
+scene.add(sunGlow);
+
+function glowTex(){
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const g=c.getContext('2d').createRadialGradient(64,64,0,64,64,64);
+  g.addColorStop(0,'rgba(255,210,140,1)'); g.addColorStop(.35,'rgba(255,170,70,.45)'); g.addColorStop(1,'rgba(255,150,50,0)');
+  const x=c.getContext('2d'); x.fillStyle=g; x.fillRect(0,0,128,128);
+  return new THREE.CanvasTexture(c);
+}
+function ringTex(hex){
+  const c=document.createElement('canvas'); c.width=c.height=256; const x=c.getContext('2d');
+  x.strokeStyle=hex; x.lineWidth=7; x.beginPath(); x.arc(128,128,96,0,7); x.stroke();
+  x.globalAlpha=.5; x.lineWidth=2; x.beginPath(); x.arc(128,128,118,0,7); x.stroke();
+  x.globalAlpha=1;
+  x.beginPath(); x.moveTo(128,10); x.lineTo(128,32); x.moveTo(128,224); x.lineTo(128,246);
+  x.moveTo(10,128); x.lineTo(32,128); x.moveTo(224,128); x.lineTo(246,128); x.lineWidth=3; x.stroke();
+  return new THREE.CanvasTexture(c);
+}
+function labelTex(text,hex){
+  const c=document.createElement('canvas'); c.width=512; c.height=128; const x=c.getContext('2d');
+  x.font='600 54px ui-monospace,Menlo,monospace'; x.textAlign='center'; x.textBaseline='middle';
+  x.fillStyle='rgba(0,0,0,.55)'; x.fillText(text.toUpperCase(),257,66);
+  x.fillStyle=hex; x.fillText(text.toUpperCase(),256,64);
+  return new THREE.CanvasTexture(c);
+}
+
+const objs = BODIES.map(b=>{
+  const hex = '#'+b.col.toString(16).padStart(6,'0');
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1,32,20),
+    new THREE.MeshStandardMaterial({color:b.col,roughness:.95,metalness:0}));
+  g.add(body);
+  let ring=null;
+  if(b.n==='Saturn'){
+    ring = new THREE.Mesh(new THREE.RingGeometry(1.2,2.27,72),
+      new THREE.MeshBasicMaterial({color:0xd9c9a0,side:THREE.DoubleSide,transparent:true,opacity:.55}));
+    ring.rotation.x = Math.PI/2 - 0.47;
+    g.add(ring);
+  }
+  let moon=null;
+  if(b.n==='Earth'){
+    moon = new THREE.Mesh(new THREE.SphereGeometry(1,16,12),
+      new THREE.MeshStandardMaterial({color:0xbdbdb8,roughness:1}));
+    scene.add(moon);
+  }
+  const beacon = new THREE.Sprite(new THREE.SpriteMaterial({map:ringTex(hex),transparent:true,depthTest:false,depthWrite:false,opacity:.85}));
+  const label  = new THREE.Sprite(new THREE.SpriteMaterial({map:labelTex(b.n,hex),transparent:true,depthTest:false,depthWrite:false,opacity:.9}));
+  beacon.renderOrder=10; label.renderOrder=11;
+  scene.add(g,beacon,label);
+  const orbit = new THREE.LineLoop(new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({color:b.col,transparent:true,opacity:.3}));
+  scene.add(orbit);
+  return {b,g,body,ring,moon,beacon,label,orbit,pos:new THREE.Vector3(),hex};
+});
+
+/* ── recompute positions & orbits ────────────────────────────── */
+function rebuild(){
+  const s = scaleOf(), T = centuries(S.date), au = auMeters();
+  sunMesh.scale.setScalar(S.sunDia/2);
+  sunGlow.scale.setScalar(S.sunDia*3.2);
+  objs.forEach(o=>{
+    const p = heliocentric(o.b,T);
+    o.pos.copy(eclToWorld(p,au));
+    o.g.position.copy(o.pos);
+    const r = o.b.dia*1000/2*s;
+    o.body.scale.setScalar(r);
+    if(o.ring) o.ring.scale.setScalar(r);
+    if(o.moon){
+      const m = moonGeocentric(S.date);
+      o.moon.position.copy(o.pos).add(eclToWorld(m,au));
+      o.moon.scale.setScalar(3474000/2*s);
+    }
+    const pts = orbitPath(o.b,T).map(pp=>eclToWorld(pp,au));
+    o.orbit.geometry.dispose();
+    o.orbit.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+  });
+  document.getElementById('sunsize').textContent = fmtDia(S.sunDia);
+  document.getElementById('auout').textContent   = au.toFixed(1)+' m';
+  drawChips();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   4. SENSORS
+   ══════════════════════════════════════════════════════════════════ */
+const zee=new THREE.Vector3(0,0,1), euler=new THREE.Euler(),
+      q0=new THREE.Quaternion(), q1=new THREE.Quaternion(-Math.SQRT1_2,0,0,Math.SQRT1_2),
+      qTrim=new THREE.Quaternion();
+let orient={a:0,b:0,g:0}, screenAngle=0, compassHeading=null;
+
+function onOrient(ev){
+  if(ev.alpha==null) return;
+  S.hasOrient = true;
+  compassHeading = (ev.webkitCompassHeading!=null) ? ev.webkitCompassHeading : null;
+  orient.a = compassHeading!=null ? 360-compassHeading : ev.alpha;
+  orient.b = ev.beta; orient.g = ev.gamma;
+}
+function applyOrientation(){
+  if(!S.hasOrient) return;
+  euler.set(orient.b*D2R, orient.a*D2R, -orient.g*D2R, 'YXZ');
+  camera.quaternion.setFromEuler(euler);
+  camera.quaternion.multiply(q1);
+  camera.quaternion.multiply(q0.setFromAxisAngle(zee,-screenAngle*D2R));
+  qTrim.setFromAxisAngle(new THREE.Vector3(0,1,0), S.headTrim*D2R);
+  camera.quaternion.premultiply(qTrim);
+}
+addEventListener('orientationchange',()=>{screenAngle = screen.orientation ? screen.orientation.angle : (window.orientation||0);});
+screenAngle = screen.orientation ? screen.orientation.angle : 0;
+
+/* ── GPS → local East/North metres, low-pass filtered ────────── */
+let smooth=null;
+function metersPerDeg(lat){
+  const p=lat*D2R;
+  return {
+    lat: 111132.92 - 559.82*Math.cos(2*p) + 1.175*Math.cos(4*p),
+    lon: 111412.84*Math.cos(p) - 93.5*Math.cos(3*p)
+  };
+}
+function enu(){
+  if(!S.origin || !S.gps) return {e:0,n:0};
+  const m = metersPerDeg(S.origin.lat);
+  return {e:(S.gps.lon-S.origin.lon)*m.lon, n:(S.gps.lat-S.origin.lat)*m.lat};
+}
+function startGPS(){
+  if(!navigator.geolocation) return;
+  navigator.geolocation.watchPosition(p=>{
+    S.gps={lat:p.coords.latitude, lon:p.coords.longitude};
+    S.acc=p.coords.accuracy;
+    if(!S.origin){ S.origin={...S.gps}; syncInputs(); }
+    const t=enu();
+    // heavier smoothing when the fix is poor
+    const k = S.acc>15 ? 0.06 : S.acc>8 ? 0.12 : 0.25;
+    smooth = smooth ? {e:smooth.e+(t.e-smooth.e)*k, n:smooth.n+(t.n-smooth.n)*k} : t;
+    updateFix();
+  }, e=>fail('Location unavailable: '+e.message),
+  {enableHighAccuracy:true, maximumAge:0, timeout:20000});
+}
+function updateFix(){
+  const ok = S.acc!=null && S.acc<=10;
+  document.getElementById('fixdot').className = 'dot'+(ok?' ok':'');
+  document.getElementById('fixtxt').textContent = S.acc==null?'no fix':'±'+S.acc.toFixed(0)+' m';
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   5. FRAME LOOP
+   ══════════════════════════════════════════════════════════════════ */
+const chips = document.getElementById('targets');
+function drawChips(){
+  chips.innerHTML='';
+  objs.forEach(o=>{
+    const d = document.createElement('button');
+    d.className='chip'+(S.target===o?' on':'');
+    d.innerHTML = `<b>${o.b.n}</b><span class="d" data-d></span>`;
+    d.onclick = ()=>{ S.target = S.target===o?null:o; drawChips(); };
+    o.chip = d; chips.appendChild(d);
+  });
+}
+const guide = document.getElementById('guide'), gp = document.getElementById('gp');
+const tmp = new THREE.Vector3();
+
+function resize(){
+  const w=innerWidth,h=innerHeight;
+  renderer.setSize(w,h,false);
+  camera.aspect=w/h; camera.updateProjectionMatrix();
+}
+addEventListener('resize',resize); resize();
+
+let lastRecalc=0;
+function frame(t){
+  requestAnimationFrame(frame);
+  if(S.live && t-lastRecalc>10000){ S.date=new Date(); rebuild(); lastRecalc=t; }
+
+  applyOrientation();
+  const p = smooth || {e:0,n:0};
+  camera.position.set(p.e, S.eye - S.plane, -p.n);
+
+  const vfovTan = Math.tan(camera.fov*D2R/2);
+  objs.forEach(o=>{
+    const dist = camera.position.distanceTo(o.pos);
+    // beacon & label keep a constant angular size
+    const k = dist * vfovTan * 0.09 * S.beacon;
+    o.beacon.position.copy(o.pos);
+    o.beacon.scale.setScalar(k*2);
+    o.beacon.visible = S.beacon>0.01;
+    o.label.position.copy(o.pos).y += k*1.9;
+    o.label.scale.set(k*3.4,k*0.85,1);
+    o.label.visible  = S.beacon>0.01;
+    o.orbit.visible  = true;
+    if(o.chip) o.chip.querySelector('[data-d]').textContent = fmt(dist);
+  });
+  sunLight.position.set(0,0,0);
+
+  // off-screen guide arrow toward the chosen target
+  if(S.target){
+    tmp.copy(S.target.pos).project(camera);
+    const onScreen = tmp.z<1 && Math.abs(tmp.x)<0.95 && Math.abs(tmp.y)<0.95;
+    guide.style.display = onScreen?'none':'block';
+    if(!onScreen){
+      let ang = Math.atan2(tmp.x, tmp.y);
+      if(tmp.z>1) ang += Math.PI;
+      gp.setAttribute('transform',`rotate(${ang*180/Math.PI})`);
+    }
+  } else guide.style.display='none';
+
+  renderer.render(scene,camera);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   6. UI
+   ══════════════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+function fail(msg){ const e=$('err'); e.textContent=msg; e.style.display='block'; setTimeout(()=>e.style.display='none',5200); }
+
+function bindSlider(id,out,key,fmtFn,after){
+  const el=$(id), o=$(out);
+  el.value = S[key];
+  const run=()=>{ S[key]=+el.value; o.textContent=fmtFn(S[key]); after&&after(); };
+  el.addEventListener('input',run); run();
+}
+bindSlider('sSun','oSun','sunDia',fmtDia,rebuild);
+bindSlider('sPlane','oPlane','plane',v=>v.toFixed(2)+' m');
+bindSlider('sEye','oEye','eye',v=>v.toFixed(2)+' m');
+bindSlider('sHead','oHead','headTrim',v=>v.toFixed(1)+'°');
+bindSlider('sBeac','oBeac','beacon',v=>v.toFixed(1));
+
+function syncInputs(){
+  if(S.origin){ $('iLat').value=S.origin.lat.toFixed(7); $('iLon').value=S.origin.lon.toFixed(7); }
+}
+['iLat','iLon'].forEach(id=>$(id).addEventListener('change',()=>{
+  const la=parseFloat($('iLat').value), lo=parseFloat($('iLon').value);
+  if(isFinite(la)&&isFinite(lo)){ S.origin={lat:la,lon:lo}; smooth=null; }
+}));
+$('iDate').addEventListener('change',e=>{
+  const d=new Date(e.target.value);
+  if(!isNaN(d)){ S.live=false; S.date=d; rebuild(); }
+});
+$('btnLive').onclick = ()=>{ S.live=true; S.date=new Date(); rebuild(); $('iDate').value=''; };
+$('btnLink').onclick = ()=>{
+  if(!S.origin) return fail('No Sun anchored yet.');
+  const u=`${location.origin}${location.pathname}?lat=${S.origin.lat.toFixed(7)}&lon=${S.origin.lon.toFixed(7)}&sun=${S.sunDia}&h=${S.plane}&trim=${S.headTrim}`;
+  navigator.clipboard?.writeText(u).then(()=>fail('Link copied.'),()=>prompt('Copy this link:',u));
+};
+$('btnAnchor').onclick = ()=>{
+  if(!S.gps) return fail('Waiting for a location fix.');
+  S.origin={...S.gps}; smooth={e:0,n:0}; syncInputs(); fail('Sun anchored where you stand.');
+};
+$('btnAlign').onclick = ()=>{
+  if(!S.target) return fail('Pick a planet first, then aim at it.');
+  const d = new THREE.Vector3().subVectors(S.target.pos,camera.position);
+  const want = Math.atan2(d.x,-d.z);
+  const fwd  = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+  const have = Math.atan2(fwd.x,-fwd.z);
+  let delta = (want-have)/D2R; delta=((delta+180)%360+360)%360-180;
+  S.headTrim = Math.max(-180,Math.min(180,S.headTrim+delta));
+  $('sHead').value=S.headTrim; $('oHead').textContent=S.headTrim.toFixed(1)+'°';
+  fail('Heading trimmed to '+S.headTrim.toFixed(1)+'°.');
+};
+$('btnSet').onclick = ()=>$('sheet').classList.add('open');
+$('close').onclick  = ()=>$('sheet').classList.remove('open');
+
+/* ── intro table ───────────────────────────────────────────────── */
+(function(){
+  const s=scaleOf(), au=auMeters(), T=centuries(new Date()), out=[];
+  BODIES.slice(0,8).forEach(b=>{
+    const p=heliocentric(b,T), r=Math.hypot(p[0],p[1],p[2]);
+    out.push(`<div><span>${b.n}</span><span>${(r*au).toFixed(0)} m &nbsp;·&nbsp; ${fmtDia(b.dia*1000*s)}</span></div>`);
+  });
+  $('introtbl').innerHTML = out.join('');
 })();
+
+/* ── permissions + start ───────────────────────────────────────── */
+$('go').onclick = async ()=>{
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920}},audio:false});
+    $('cam').srcObject = stream;
+  }catch(e){ fail('Camera blocked — the model still works, without the view.'); }
+
+  try{
+    if(typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission){
+      const r = await DeviceOrientationEvent.requestPermission();
+      if(r!=='granted') fail('Motion access denied — the compass will not work.');
+    }
+  }catch(e){}
+  addEventListener('deviceorientationabsolute', onOrient, true);
+  addEventListener('deviceorientation', onOrient, true);
+
+  startGPS();
+  setTimeout(()=>{ if(!S.hasOrient) enableDesktop(); },2500);
+
+  $('intro').style.display='none';
+  rebuild(); syncInputs();
+  requestAnimationFrame(frame);
+};
+
+/* ── desktop fallback: drag to look, WASD to walk ──────────────── */
+function enableDesktop(){
+  let yaw=0,pitch=0,drag=false,px=0,py=0;
+  const keys={};
+  addEventListener('pointerdown',e=>{ if(e.target.closest('#rail,#sheet'))return; drag=true;px=e.clientX;py=e.clientY;});
+  addEventListener('pointerup',()=>drag=false);
+  addEventListener('pointermove',e=>{ if(!drag)return; yaw-=(e.clientX-px)*.004; pitch-=(e.clientY-py)*.004;
+    pitch=Math.max(-1.5,Math.min(1.5,pitch)); px=e.clientX;py=e.clientY;
+    camera.quaternion.setFromEuler(new THREE.Euler(pitch,yaw,0,'YXZ'));});
+  addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
+  addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+  if(!smooth) smooth={e:0,n:0};
+  setInterval(()=>{
+    const sp = keys.shift?4:0.6;
+    const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
+    const r = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); r.y=0; r.normalize();
+    let dx=0,dz=0;
+    if(keys.w||keys.arrowup){dx+=f.x*sp;dz+=-f.z*sp}
+    if(keys.s||keys.arrowdown){dx-=f.x*sp;dz-=-f.z*sp}
+    if(keys.a||keys.arrowleft){dx-=r.x*sp;dz-=-r.z*sp}
+    if(keys.d||keys.arrowright){dx+=r.x*sp;dz+=-r.z*sp}
+    smooth.e+=dx; smooth.n+=dz;
+  },50);
+  $('fixtxt').textContent='desktop';
+  fail('No compass here — drag to look, WASD to walk, Shift to run.');
+}
 </script>
 </body>
 </html>
