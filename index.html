@@ -8,8 +8,6 @@
 
 <!-- ============================================================
      LIBRARIES
-     A-Frame must load before AR.js. astronomy-engine exposes a
-     global `Astronomy` object.
      ============================================================ -->
 <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
 <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/aframe/build/aframe-ar.js"></script>
@@ -22,8 +20,8 @@
     --hair:rgba(140,190,255,.22);
     --ink:#e8f0ff;
     --dim:#7d90ad;
-    --beam:#5fe3ff;   /* instrument cyan */
-    --flare:#ffb35c;  /* solar amber */
+    --beam:#5fe3ff;
+    --flare:#ffb35c;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;overflow:hidden;background:var(--void);
@@ -45,7 +43,6 @@
   h1 em{font-style:normal;color:var(--flare)}
   .lede{color:var(--dim);font-size:13.5px;line-height:1.65;margin:14px 0 0;max-width:44ch}
 
-  /* Signature element: the scale ledger, printed like an instrument spec plate */
   .ledger{margin:26px 0 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
   .ledger div{display:flex;justify-content:space-between;gap:14px;padding:9px 0;
     font-size:12px;border-bottom:1px solid rgba(140,190,255,.08)}
@@ -107,15 +104,14 @@
      solar system becomes a thing you can walk across — planets reduced to grains of sand, orbits measured
      in city blocks. Placed at your feet, in their real positions, right now.</p>
 
-  <div class="ledger" id="ledger"><!-- filled by JS from the actual scale factor --></div>
+  <div class="ledger" id="ledger"></div>
 
   <button class="cta" id="btnPlace">Place Sun at My Location</button>
   <button class="ghost" id="btnSim">Preview without GPS (desktop)</button>
 
   <p class="note">
     Needs <b>HTTPS</b>, an outdoor sky view, and permission for <b>camera</b>, <b>location</b> and
-    <b>motion&nbsp;&amp;&nbsp;orientation</b>. Phone GPS is accurate to roughly 5&nbsp;m — about a quarter of
-    Earth's orbit at this scale — so treat the halos as search zones, not survey markers.
+    <b>motion&nbsp;&amp;&nbsp;orientation</b>.
   </p>
   <p class="note" id="launchErr"></p>
 </div>
@@ -139,30 +135,22 @@
 <script>
 /* ==================================================================
    1. SCALE MATHEMATICS
-   ------------------------------------------------------------------
-   One scale factor governs everything: bodies AND orbital distances.
    ================================================================== */
-const SUN_DIAMETER_KM        = 1392700;      // real Sun
-const TARGET_SUN_DIAMETER_M  = 0.21;         // regulation volleyball (65-67cm circumference)
-const SCALE                  = TARGET_SUN_DIAMETER_M / (SUN_DIAMETER_KM * 1000); // ≈ 1.5079e-10
+const SUN_DIAMETER_KM        = 1392700;
+const TARGET_SUN_DIAMETER_M  = 0.21;
+const SCALE                  = TARGET_SUN_DIAMETER_M / (SUN_DIAMETER_KM * 1000); 
 const AU_KM                  = 149597870.7;
-const M_PER_AU               = AU_KM * 1000 * SCALE;   // ≈ 22.56 model-metres per AU
+const M_PER_AU               = AU_KM * 1000 * SCALE;   
 
-/* GPS conversion. 1 m ≈ 0.0000089° of latitude. Longitude degrees shrink
-   toward the poles, so divide by cos(latitude) or your east–west distances
-   will be wrong by 20%+ outside the tropics. */
-const DEG_PER_METRE = 0.0000089;
-
-/* ---- Tunables ---- */
 const CFG = {
-  PLANET_Y      : 1.6,    // planets at eye height so they sit on the horizon line
-  ORBIT_Y       : 0.05,   // orbit rings hug the ground
-  HALO_DIAM     : 0.5,    // base halo diameter (m) before angular compensation
-  HALO_REF_DIST : 14,     // distance (m) at which halo renders at base size
-  HALO_MAX      : 45,     // clamp so Neptune's halo doesn't eat the sky
-  BEACON_H      : 3.0,    // vertical finder column height (m) before compensation
-  SUN_OFFSET_N  : 0,      // metres north of you to drop the Sun (0 = exactly at your feet)
-  FLATTEN       : false   // true = force all planets onto one flat plane, ignoring inclination
+  PLANET_Y      : 1.6,    
+  ORBIT_Y       : 0.05,   
+  HALO_DIAM     : 0.5,    
+  HALO_REF_DIST : 14,     
+  HALO_MAX      : 45,     
+  BEACON_H      : 3.0,    
+  SUN_OFFSET_N  : 0,      
+  FLATTEN       : false   
 };
 
 const PLANETS = [
@@ -176,18 +164,13 @@ const PLANETS = [
   { name:'Neptune', body:'Neptune', dKm: 49528, a:30.06992,color:'#5b78f0', L0:304.35, P:60189.000 }
 ];
 
-const scaledRadius = p => (p.dKm * 1000 * SCALE) / 2;   // metres
+const scaledRadius = p => (p.dKm * 1000 * SCALE) / 2;   
 const fmtM = m => m < 1 ? (m*1000).toFixed(m*1000 < 10 ? 2 : 1) + ' mm'
                         : m < 1000 ? m.toFixed(m < 10 ? 2 : 1) + ' m'
                                    : (m/1000).toFixed(2) + ' km';
 
 /* ==================================================================
    2. REAL-TIME ASTRONOMY
-   ------------------------------------------------------------------
-   astronomy-engine's HelioVector returns J2000 EQUATORIAL coordinates.
-   We rotate by the obliquity of the ecliptic to get ecliptic X/Y/Z,
-   so that the ecliptic plane maps onto the ground plane.
-     x_ecl -> East      y_ecl -> North      z_ecl -> Up (inclination)
    ================================================================== */
 const OBLIQUITY = 23.4392911 * Math.PI / 180;
 let ephemerisSource = 'unavailable';
@@ -195,7 +178,7 @@ let ephemerisSource = 'unavailable';
 function heliocentricAU(p, date){
   if (window.Astronomy && Astronomy.HelioVector && Astronomy.Body && Astronomy.Body[p.body]){
     try{
-      const v = Astronomy.HelioVector(Astronomy.Body[p.body], date); // AU, EQJ
+      const v = Astronomy.HelioVector(Astronomy.Body[p.body], date); 
       ephemerisSource = 'astronomy-engine';
       return {
         x:  v.x,
@@ -204,8 +187,6 @@ function heliocentricAU(p, date){
       };
     }catch(e){ console.warn('HelioVector failed for ' + p.name, e); }
   }
-  // Fallback: circular orbit from mean longitude. Good to ~1-2° — plenty
-  // at a scale where GPS error already dwarfs the difference.
   ephemerisSource = 'mean-longitude fallback';
   const days = (date - Date.UTC(2000,0,1,12,0,0)) / 86400000;
   const L = (p.L0 + 360 * days / p.P) * Math.PI / 180;
@@ -223,20 +204,9 @@ function planetOffset(p, date){
   };
 }
 
-function offsetToLatLon(lat, lon, eastM, northM){
-  return {
-    lat: lat + northM * DEG_PER_METRE,
-    lon: lon + (eastM * DEG_PER_METRE) / Math.cos(lat * Math.PI / 180)
-  };
-}
-
 /* ==================================================================
    3. CUSTOM A-FRAME COMPONENTS
    ================================================================== */
-
-/* Keeps an element at constant apparent size regardless of distance.
-   This is what makes a 2 mm Earth findable from 22 m — the halo and
-   label grow, the physically-accurate sphere never does. */
 AFRAME.registerComponent('angular-scale', {
   schema:{ ref:{default:CFG.HALO_REF_DIST}, min:{default:1}, max:{default:CFG.HALO_MAX} },
   init(){ this._a = new THREE.Vector3(); this._b = new THREE.Vector3(); this._t = 999; },
@@ -251,46 +221,38 @@ AFRAME.registerComponent('angular-scale', {
   }
 });
 
-/* Yaw-only billboard: labels stay upright and readable, never pitch. */
 AFRAME.registerComponent('billboard', {
   init(){ this._p = new THREE.Vector3(); this._c = new THREE.Vector3(); },
   tick(){
     const cam = this.el.sceneEl.camera; if (!cam) return;
     this.el.object3D.getWorldPosition(this._p);
     cam.getWorldPosition(this._c);
-    this._c.y = this._p.y;                    // lock pitch
+    this._c.y = this._p.y;                    
     this.el.object3D.lookAt(this._c);
-    this.el.object3D.rotateY(Math.PI);        // a-text faces +Z
+    this.el.object3D.rotateY(Math.PI);        
   }
 });
 
 /* ==================================================================
-   4. SCENE CONSTRUCTION
+   4. SCENE CONSTRUCTION (Completely updated to bypass GPS Math Bugs)
    ================================================================== */
 const $ = id => document.getElementById(id);
 const el = (tag, attrs) => { const e = document.createElement(tag);
   for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
 
-let sceneEl = null, sunOrigin = null, placedAt = null;
+let sceneEl = null;
 let orbitsOn = true, halosOn = true, simMode = false;
-const targets = [];   // {name, color, node, rFromSun}
+const targets = [];   
 
 function buildScene(lat, lon){
   if (sceneEl){ sceneEl.parentNode.removeChild(sceneEl); sceneEl = null; targets.length = 0; }
-
   const now = new Date();
-  const sunLL = offsetToLatLon(lat, lon, 0, CFG.SUN_OFFSET_N);
-  sunOrigin = sunLL; placedAt = now;
 
   sceneEl = el('a-scene', {
     'vr-mode-ui'                      : 'enabled: false',
     'device-orientation-permission-ui': 'enabled: false',
     'embedded'                        : '',
-    /* videoTexture:true is mandatory for location-based AR — without it the
-       video plane clips anything more than a few metres out, i.e. everything. */
     'arjs'    : 'sourceType: webcam; videoTexture: true; debugUIEnabled: false',
-    /* logarithmicDepthBuffer keeps a 2 mm sphere and a 678 m ring in the same
-       depth buffer without z-fighting. */
     'renderer': 'antialias: true; alpha: true; logarithmicDepthBuffer: true; colorManagement: true; sortObjects: true'
   });
 
@@ -310,10 +272,10 @@ function buildScene(lat, lon){
   });
   sceneEl.appendChild(cam);
 
-  /* ---- Sun (the anchor for everything) ---- */
+  /* ---- Sun (Anchored at exact center of the world / user location) ---- */
   const sunNode = el('a-entity', {
-    'gps-new-entity-place': `latitude: ${sunLL.lat}; longitude: ${sunLL.lon}`,
-    id: 'sun'
+    id: 'sun',
+    position: `0 0 ${-CFG.SUN_OFFSET_N}` 
   });
 
   const sunGroup = el('a-entity', { position: `0 ${CFG.PLANET_Y} 0` });
@@ -321,15 +283,14 @@ function buildScene(lat, lon){
     radius  : TARGET_SUN_DIAMETER_M / 2,
     material: `shader: standard; color: #fff3d0; emissive: #ffb03a; emissiveIntensity: 1.4; roughness: 1; metalness: 0`
   }));
-  sunGroup.appendChild(el('a-sphere', {   // corona
+  sunGroup.appendChild(el('a-sphere', {   
     radius  : TARGET_SUN_DIAMETER_M * 1.6,
     material: 'shader: flat; color: #ffb35c; opacity: 0.16; transparent: true; side: double; depthWrite: false'
   }));
   sunGroup.appendChild(makeLabel('SUN', 'volleyball · 21 cm', '#ffb35c', 0.42));
   sunNode.appendChild(sunGroup);
 
-  /* ---- Orbit rings: children of the Sun, so their local metres are
-          already centred on the Sun's GPS coordinate ---- */
+  /* ---- Orbit rings ---- */
   const orbits = el('a-entity', { id: 'orbits', position: `0 ${CFG.ORBIT_Y} 0` });
   PLANETS.forEach(p => {
     const r = p.a * M_PER_AU;
@@ -342,31 +303,28 @@ function buildScene(lat, lon){
   });
   sunNode.appendChild(orbits);
   sceneEl.appendChild(sunNode);
-
   targets.push({ name:'Sun', color:'#ffb35c', node:sunGroup, rFromSun:0 });
 
   /* ---- Planets ---- */
   PLANETS.forEach(p => {
-    const o  = planetOffset(p, now);
-    const ll = offsetToLatLon(sunLL.lat, sunLL.lon, o.east, o.north);
-
-    const node  = el('a-entity', { 'gps-new-entity-place': `latitude: ${ll.lat}; longitude: ${ll.lon}` });
+    const o = planetOffset(p, now);
+    
+    // Position planets using true 3D meters, side-stepping AR.js GPS projection flaws
+    const node = el('a-entity', { position: `${o.east} 0 ${-o.north - CFG.SUN_OFFSET_N}` });
     const group = el('a-entity', { position: `0 ${CFG.PLANET_Y + o.up} 0` });
 
-    // (a) the honest body — true scale, often sub-millimetre
     group.appendChild(el('a-sphere', {
       radius   : scaledRadius(p),
       'segments-width': 24, 'segments-height': 16,
       material : `shader: standard; color: ${p.color}; emissive: ${p.color}; emissiveIntensity: 0.55; roughness: 0.9`
     }));
 
-    // (b) the findable wrapper — halo, beacon, label; all angular-compensated
     const boost = el('a-entity', { 'angular-scale': `ref: ${CFG.HALO_REF_DIST}`, class: 'boost' });
     boost.appendChild(el('a-sphere', {
       radius   : CFG.HALO_DIAM / 2,
       material : `shader: flat; color: ${p.color}; opacity: 0.22; transparent: true; side: double; depthWrite: false`
     }));
-    boost.appendChild(el('a-cylinder', {   // vertical finder column
+    boost.appendChild(el('a-cylinder', {   
       radius   : 0.012, height: CFG.BEACON_H, position: `0 ${CFG.BEACON_H/2} 0`,
       material : `shader: flat; color: ${p.color}; opacity: 0.13; transparent: true; depthWrite: false`
     }));
@@ -402,7 +360,6 @@ function makeLabel(title, sub, color, y){
   return wrap;
 }
 
-/* ---- Live target list: distance from you to each body ---- */
 const _v = new THREE.Vector3(), _c = new THREE.Vector3();
 function renderTargetList(){
   if (!sceneEl || !targets.length) return;
@@ -436,8 +393,6 @@ function launchError(msg){
   $('btnPlace').textContent = 'Place Sun at My Location';
 }
 
-/* iOS 13+ gates motion sensors behind a user-gesture prompt. Android and
-   older iOS resolve immediately. */
 async function requestMotion(){
   const ask = async C => {
     if (typeof C !== 'undefined' && typeof C.requestPermission === 'function'){
@@ -449,13 +404,11 @@ async function requestMotion(){
   try { await ask(window.DeviceMotionEvent); } catch(_){}
 }
 
-/* Prompt for the camera up front so failures surface as readable text
-   rather than a black screen inside AR.js. */
 async function primeCamera(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
     throw new Error('This browser has no camera API. Use Safari on iOS or Chrome on Android, over HTTPS.');
   const s = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } }, audio:false });
-  s.getTracks().forEach(t => t.stop());   // release it for AR.js
+  s.getTracks().forEach(t => t.stop());   
   await new Promise(r => setTimeout(r, 250));
 }
 
@@ -491,11 +444,9 @@ $('btnPlace').addEventListener('click', async () => {
   }
 });
 
-/* Desktop preview: simulated GPS, no sensors, so you can sanity-check
-   geometry before walking outside. */
 $('btnSim').addEventListener('click', () => {
   simMode = true;
-  buildScene(-6.9175, 107.6191);   // Bandung, West Java — change freely
+  buildScene(-6.9175, 107.6191);   
   toast('Preview mode: simulated GPS, no live sensors.', 3600);
 });
 
@@ -518,7 +469,7 @@ $('tRecentre').addEventListener('click', async () => {
 });
 
 /* ==================================================================
-   6. LAUNCH-SCREEN LEDGER (derived, never hardcoded)
+   6. LAUNCH-SCREEN LEDGER 
    ================================================================== */
 (function ledger(){
   const earth = PLANETS[2], nep = PLANETS[7];
