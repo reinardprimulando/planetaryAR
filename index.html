@@ -1,213 +1,540 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>AR Real-Time Solar System</title>
-    
-    <!-- A-Frame -->
-    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-    <script src="https://unpkg.com/aframe-look-at-component@1.0.0/dist/aframe-look-at-component.min.js"></script>
-    
-    <!-- Full AR.js build for Webcam Support -->
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
-    
-    <!-- Astronomy Engine -->
-    <script src="https://unpkg.com/astronomy-engine@2.1.19/astronomy.browser.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Volleyball Sun — Walkable AR Solar System</title>
 
-    <style>
-        body, html { 
-            margin: 0; 
-            padding: 0;
-            overflow: hidden; 
-            font-family: sans-serif; 
-            background-color: transparent !important;
-        }
-        
-        #ui-container {
-            position: absolute;
-            bottom: 40px;
-            left: 0;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            z-index: 9999;
-        }
+<!-- ============================================================
+     LIBRARIES
+     A-Frame must load before AR.js. astronomy-engine exposes a
+     global `Astronomy` object.
+     ============================================================ -->
+<script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.7/aframe/build/aframe-ar.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
 
-        #place-btn {
-            background-color: #ff9800;
-            color: #fff;
-            border: none;
-            padding: 18px 32px;
-            font-size: 18px;
-            font-weight: bold;
-            border-radius: 30px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            cursor: pointer;
-            transition: background 0.3s;
-        }
+<style>
+  :root{
+    --void:#05070d;
+    --panel:rgba(9,14,24,.82);
+    --hair:rgba(140,190,255,.22);
+    --ink:#e8f0ff;
+    --dim:#7d90ad;
+    --beam:#5fe3ff;   /* instrument cyan */
+    --flare:#ffb35c;  /* solar amber */
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--void);
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--ink)}
+  a-scene{position:fixed;inset:0}
 
-        #place-btn:active { background-color: #e68a00; }
-        
-        #info-panel {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            right: 20px;
-            color: white;
-            background: rgba(0, 0, 0, 0.6);
-            padding: 15px;
-            border-radius: 10px;
-            z-index: 9999;
-            text-align: center;
-            pointer-events: none;
-        }
-    </style>
+  /* ---------- Launch screen ---------- */
+  #launch{
+    position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;
+    justify-content:center;padding:28px 24px calc(28px + env(safe-area-inset-bottom));
+    background:
+      radial-gradient(120% 70% at 50% 8%, rgba(255,179,92,.20), transparent 60%),
+      radial-gradient(90% 60% at 20% 100%, rgba(95,227,255,.10), transparent 65%),
+      var(--void);
+    overflow-y:auto;
+  }
+  .eyebrow{font-size:11px;letter-spacing:.32em;color:var(--beam);text-transform:uppercase}
+  h1{font-size:clamp(30px,10vw,46px);line-height:.98;margin:14px 0 0;font-weight:700;letter-spacing:-.02em}
+  h1 em{font-style:normal;color:var(--flare)}
+  .lede{color:var(--dim);font-size:13.5px;line-height:1.65;margin:14px 0 0;max-width:44ch}
+
+  /* Signature element: the scale ledger, printed like an instrument spec plate */
+  .ledger{margin:26px 0 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+  .ledger div{display:flex;justify-content:space-between;gap:14px;padding:9px 0;
+    font-size:12px;border-bottom:1px solid rgba(140,190,255,.08)}
+  .ledger div:last-child{border-bottom:0}
+  .ledger span:first-child{color:var(--dim);letter-spacing:.06em}
+  .ledger span:last-child{color:var(--ink);font-variant-numeric:tabular-nums}
+  .ledger b{color:var(--flare);font-weight:600}
+
+  button{font:inherit;border:0;cursor:pointer}
+  .cta{width:100%;margin-top:26px;padding:17px 20px;border-radius:2px;
+    background:var(--flare);color:#180c00;font-size:15px;font-weight:700;letter-spacing:.02em}
+  .cta:active{transform:translateY(1px)}
+  .cta[disabled]{opacity:.45}
+  .ghost{width:100%;margin-top:10px;padding:13px;border:1px solid var(--hair);
+    background:transparent;color:var(--dim);font-size:12px;letter-spacing:.12em;text-transform:uppercase}
+  .note{margin-top:16px;font-size:11px;line-height:1.6;color:var(--dim)}
+  .note b{color:var(--beam);font-weight:600}
+
+  /* ---------- In-AR HUD ---------- */
+  #hud{position:fixed;inset:0;z-index:20;display:none;pointer-events:none}
+  #readout{
+    position:absolute;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));
+    background:var(--panel);border:1px solid var(--hair);border-radius:2px;
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    padding:9px 11px;font-size:11px;line-height:1.55;pointer-events:auto
+  }
+  #readout .row{display:flex;justify-content:space-between;gap:10px}
+  #readout .k{color:var(--dim);letter-spacing:.1em}
+  #readout .v{font-variant-numeric:tabular-nums}
+  #targets{margin-top:8px;border-top:1px solid rgba(140,190,255,.14);padding-top:7px;
+    max-height:34vh;overflow-y:auto}
+  #targets .t{display:flex;justify-content:space-between;gap:8px;padding:2.5px 0}
+  #targets .t i{font-style:normal;display:inline-block;width:7px;height:7px;border-radius:50%;
+    margin-right:7px;vertical-align:1px}
+  #targets .t b{font-weight:600;letter-spacing:.05em}
+  #targets .t span{color:var(--dim);font-variant-numeric:tabular-nums}
+
+  #tray{position:absolute;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));
+    display:flex;gap:7px;pointer-events:auto}
+  #tray button{flex:1;padding:12px 4px;border:1px solid var(--hair);border-radius:2px;
+    background:var(--panel);color:var(--ink);font-size:10.5px;letter-spacing:.08em;
+    text-transform:uppercase;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  #tray button.off{color:var(--dim);opacity:.55}
+
+  #toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    background:var(--panel);border:1px solid var(--hair);padding:14px 18px;border-radius:2px;
+    font-size:12px;text-align:center;max-width:80vw;line-height:1.6;display:none}
+  .err{color:#ff9b8a}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
 </head>
 <body>
 
-    <div id="info-panel">
-        <strong>Real-Time Scaled AR Solar System</strong><br>
-        <small>Sun size: 0.21m (Volleyball)</small>
-    </div>
+<!-- ============================================================ LAUNCH ============================================================ -->
+<div id="launch">
+  <p class="eyebrow">Heliocentric · true scale · live ephemeris</p>
+  <h1>The Sun is a <em>volleyball</em>.</h1>
+  <p class="lede">Everything else follows from that one decision. Shrink the real Sun to 21&nbsp;cm and the whole
+     solar system becomes a thing you can walk across — planets reduced to grains of sand, orbits measured
+     in city blocks. Placed at your feet, in their real positions, right now.</p>
 
-    <div id="ui-container">
-        <button id="place-btn">Place Sun Near Me</button>
-    </div>
+  <div class="ledger" id="ledger"><!-- filled by JS from the actual scale factor --></div>
 
-    <a-scene vr-mode-ui="enabled: false" arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;" renderer="antialias: true; alpha: true; clearColor: transparent;">
-        <!-- FIX 3: Expanded Far Plane to 20,000 meters to prevent distant culling -->
-        <a-camera gps-new-camera="gpsMinDistance: 1;" far="20000"></a-camera>
-    </a-scene>
+  <button class="cta" id="btnPlace">Place Sun at My Location</button>
+  <button class="ghost" id="btnSim">Preview without GPS (desktop)</button>
 
-    <script>
-        const REAL_SUN_DIAMETER_M = 1392700000;
-        const TARGET_SUN_DIAMETER_M = 0.21;
-        const SCALE_FACTOR = TARGET_SUN_DIAMETER_M / REAL_SUN_DIAMETER_M;
-        const AU_IN_METERS = 149597870700;
-        const SCALED_AU_M = AU_IN_METERS * SCALE_FACTOR;
-        const METERS_PER_DEG_LAT = 111320;
+  <p class="note">
+    Needs <b>HTTPS</b>, an outdoor sky view, and permission for <b>camera</b>, <b>location</b> and
+    <b>motion&nbsp;&amp;&nbsp;orientation</b>. Phone GPS is accurate to roughly 5&nbsp;m — about a quarter of
+    Earth's orbit at this scale — so treat the halos as search zones, not survey markers.
+  </p>
+  <p class="note" id="launchErr"></p>
+</div>
 
-        const planets = [
-            { name: 'Mercury', body: 'Mercury', diameter: 4880000, color: '#a8a8a8' },
-            { name: 'Venus',   body: 'Venus',   diameter: 12104000, color: '#e0ce8d' },
-            { name: 'Earth',   body: 'Earth',   diameter: 12742000, color: '#2b82c9' },
-            { name: 'Mars',    body: 'Mars',    diameter: 6779000, color: '#c1440e' },
-            { name: 'Jupiter', body: 'Jupiter', diameter: 139820000, color: '#d39c7e' },
-            { name: 'Saturn',  body: 'Saturn',  diameter: 116460000, color: '#c5ab6e' },
-            { name: 'Uranus',  body: 'Uranus',  diameter: 50724000, color: '#4b70dd' },
-            { name: 'Neptune', body: 'Neptune', diameter: 49244000, color: '#274687' }
-        ];
+<!-- ============================================================ HUD ============================================================ -->
+<div id="hud">
+  <div id="readout">
+    <div class="row"><span class="k">SCALE</span><span class="v" id="rScale">—</span></div>
+    <div class="row"><span class="k">EPHEMERIS</span><span class="v" id="rEph">—</span></div>
+    <div class="row"><span class="k">GPS FIX</span><span class="v" id="rFix">acquiring…</span></div>
+    <div id="targets"></div>
+  </div>
+  <div id="tray">
+    <button id="tOrbits">Orbits</button>
+    <button id="tHalos">Halos</button>
+    <button id="tRecentre">Re-place Sun</button>
+  </div>
+  <div id="toast"></div>
+</div>
 
-        const placeBtn = document.getElementById('place-btn');
-        const scene = document.querySelector('a-scene');
+<script>
+/* ==================================================================
+   1. SCALE MATHEMATICS
+   ------------------------------------------------------------------
+   One scale factor governs everything: bodies AND orbital distances.
+   ================================================================== */
+const SUN_DIAMETER_KM        = 1392700;      // real Sun
+const TARGET_SUN_DIAMETER_M  = 0.21;         // regulation volleyball (65-67cm circumference)
+const SCALE                  = TARGET_SUN_DIAMETER_M / (SUN_DIAMETER_KM * 1000); // ≈ 1.5079e-10
+const AU_KM                  = 149597870.7;
+const M_PER_AU               = AU_KM * 1000 * SCALE;   // ≈ 22.56 model-metres per AU
 
-        placeBtn.addEventListener('click', async () => {
-            placeBtn.innerText = "Acquiring GPS...";
-            placeBtn.disabled = true;
+/* GPS conversion. 1 m ≈ 0.0000089° of latitude. Longitude degrees shrink
+   toward the poles, so divide by cos(latitude) or your east–west distances
+   will be wrong by 20%+ outside the tropics. */
+const DEG_PER_METRE = 0.0000089;
 
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    placeBtn.style.display = 'none';
-                    buildSolarSystem(position);
-                },
-                (error) => {
-                    alert(`GPS Error: ${error.message}`);
-                    placeBtn.innerText = "Place Sun Near Me";
-                    placeBtn.disabled = false;
-                },
-                { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
-            );
-        });
+/* ---- Tunables ---- */
+const CFG = {
+  PLANET_Y      : 1.6,    // planets at eye height so they sit on the horizon line
+  ORBIT_Y       : 0.05,   // orbit rings hug the ground
+  HALO_DIAM     : 0.5,    // base halo diameter (m) before angular compensation
+  HALO_REF_DIST : 14,     // distance (m) at which halo renders at base size
+  HALO_MAX      : 45,     // clamp so Neptune's halo doesn't eat the sky
+  BEACON_H      : 3.0,    // vertical finder column height (m) before compensation
+  SUN_OFFSET_N  : 0,      // metres north of you to drop the Sun (0 = exactly at your feet)
+  FLATTEN       : false   // true = force all planets onto one flat plane, ignoring inclination
+};
 
-        function buildSolarSystem(position) {
-            // Anchor 3 meters North
-            const sunLat = position.coords.latitude + (3 / METERS_PER_DEG_LAT);
-            const sunLon = position.coords.longitude;
+const PLANETS = [
+  { name:'Mercury', body:'Mercury', dKm:  4879, a:0.38710, color:'#a89a8c', L0:252.25, P:   87.969 },
+  { name:'Venus',   body:'Venus',   dKm: 12104, a:0.72333, color:'#e8cf9e', L0:181.98, P:  224.701 },
+  { name:'Earth',   body:'Earth',   dKm: 12756, a:1.00000, color:'#4f9ff0', L0:100.46, P:  365.256 },
+  { name:'Mars',    body:'Mars',    dKm:  6792, a:1.52371, color:'#d9603b', L0:355.43, P:  686.980 },
+  { name:'Jupiter', body:'Jupiter', dKm:142984, a:5.20289, color:'#d8a86a', L0: 34.35, P: 4332.589 },
+  { name:'Saturn',  body:'Saturn',  dKm:120536, a:9.53667, color:'#e6d6a8', L0: 50.08, P:10759.220 },
+  { name:'Uranus',  body:'Uranus',  dKm: 51118, a:19.18916,color:'#93d8e8', L0:314.06, P:30685.400 },
+  { name:'Neptune', body:'Neptune', dKm: 49528, a:30.06992,color:'#5b78f0', L0:304.35, P:60189.000 }
+];
 
-            document.getElementById('info-panel').innerHTML += `<br><small style="color:#ff5555;">Look around for the giant RED PILLAR!</small>`;
+const scaledRadius = p => (p.dKm * 1000 * SCALE) / 2;   // metres
+const fmtM = m => m < 1 ? (m*1000).toFixed(m*1000 < 10 ? 2 : 1) + ' mm'
+                        : m < 1000 ? m.toFixed(m < 10 ? 2 : 1) + ' m'
+                                   : (m/1000).toFixed(2) + ' km';
 
-            // 1. ABSOLUTE GPS ANCHOR
-            const sunAnchor = document.createElement('a-entity');
-            sunAnchor.setAttribute('gps-new-entity-place', `latitude: ${sunLat}; longitude: ${sunLon}`);
-            
-            // 2. EYE-LEVEL WRAPPER (Fixes sinking into the floor)
-            const sunWrapper = document.createElement('a-entity');
-            sunWrapper.setAttribute('position', '0 1.6 0'); // Elevate 1.6 meters
+/* ==================================================================
+   2. REAL-TIME ASTRONOMY
+   ------------------------------------------------------------------
+   astronomy-engine's HelioVector returns J2000 EQUATORIAL coordinates.
+   We rotate by the obliquity of the ecliptic to get ecliptic X/Y/Z,
+   so that the ecliptic plane maps onto the ground plane.
+     x_ecl -> East      y_ecl -> North      z_ecl -> Up (inclination)
+   ================================================================== */
+const OBLIQUITY = 23.4392911 * Math.PI / 180;
+let ephemerisSource = 'unavailable';
 
-            // The Sun Sphere
-            const sunSphere = document.createElement('a-sphere');
-            sunSphere.setAttribute('radius', (TARGET_SUN_DIAMETER_M / 2).toFixed(4));
-            sunSphere.setAttribute('material', 'color: #ffcc00; emissive: #ffaa00; emissiveIntensity: 0.5');
-            
-            // FIX 1: THE GIANT RED LOCATOR BEAM
-            const locator = document.createElement('a-cylinder');
-            locator.setAttribute('radius', '0.05');
-            locator.setAttribute('height', '200'); // 200 meters tall!
-            locator.setAttribute('material', 'color: red; opacity: 0.6; transparent: true;');
+function heliocentricAU(p, date){
+  if (window.Astronomy && Astronomy.HelioVector && Astronomy.Body && Astronomy.Body[p.body]){
+    try{
+      const v = Astronomy.HelioVector(Astronomy.Body[p.body], date); // AU, EQJ
+      ephemerisSource = 'astronomy-engine';
+      return {
+        x:  v.x,
+        y:  v.y * Math.cos(OBLIQUITY) + v.z * Math.sin(OBLIQUITY),
+        z: -v.y * Math.sin(OBLIQUITY) + v.z * Math.cos(OBLIQUITY)
+      };
+    }catch(e){ console.warn('HelioVector failed for ' + p.name, e); }
+  }
+  // Fallback: circular orbit from mean longitude. Good to ~1-2° — plenty
+  // at a scale where GPS error already dwarfs the difference.
+  ephemerisSource = 'mean-longitude fallback';
+  const days = (date - Date.UTC(2000,0,1,12,0,0)) / 86400000;
+  const L = (p.L0 + 360 * days / p.P) * Math.PI / 180;
+  return { x: p.a * Math.cos(L), y: p.a * Math.sin(L), z: 0 };
+}
 
-            sunWrapper.appendChild(sunSphere);
-            sunWrapper.appendChild(locator);
-            sunAnchor.appendChild(sunWrapper);
-            scene.appendChild(sunAnchor);
+/* Metres east/north/up of the Sun, at model scale. */
+function planetOffset(p, date){
+  const v = heliocentricAU(p, date);
+  return {
+    east : v.x * M_PER_AU,
+    north: v.y * M_PER_AU,
+    up   : CFG.FLATTEN ? 0 : v.z * M_PER_AU,
+    r    : Math.hypot(v.x, v.y, v.z) * M_PER_AU
+  };
+}
 
-            const astroTime = new Astronomy.AstroTime(new Date());
+function offsetToLatLon(lat, lon, eastM, northM){
+  return {
+    lat: lat + northM * DEG_PER_METRE,
+    lon: lon + (eastM * DEG_PER_METRE) / Math.cos(lat * Math.PI / 180)
+  };
+}
 
-            planets.forEach(planet => {
-                const vec = Astronomy.HelioVector(Astronomy.Body[planet.body], astroTime);
-                
-                const x_meters = vec.x * SCALED_AU_M;
-                const y_meters = vec.y * SCALED_AU_M;
-                const z_meters = vec.z * SCALED_AU_M;
-                
-                const r_meters = Math.sqrt(x_meters**2 + y_meters**2 + z_meters**2);
+/* ==================================================================
+   3. CUSTOM A-FRAME COMPONENTS
+   ================================================================== */
 
-                const latOffset = y_meters / METERS_PER_DEG_LAT;
-                const lonOffset = x_meters / (METERS_PER_DEG_LAT * Math.cos(sunLat * (Math.PI / 180)));
+/* Keeps an element at constant apparent size regardless of distance.
+   This is what makes a 2 mm Earth findable from 22 m — the halo and
+   label grow, the physically-accurate sphere never does. */
+AFRAME.registerComponent('angular-scale', {
+  schema:{ ref:{default:CFG.HALO_REF_DIST}, min:{default:1}, max:{default:CFG.HALO_MAX} },
+  init(){ this._a = new THREE.Vector3(); this._b = new THREE.Vector3(); this._t = 999; },
+  tick(t, dt){
+    this._t += dt || 16; if (this._t < 200) return; this._t = 0;
+    const cam = this.el.sceneEl.camera; if (!cam) return;
+    this.el.object3D.getWorldPosition(this._a);
+    cam.getWorldPosition(this._b);
+    const s = THREE.MathUtils.clamp(this._a.distanceTo(this._b) / this.data.ref,
+                                    this.data.min, this.data.max);
+    this.el.object3D.scale.set(s, s, s);
+  }
+});
 
-                // Planet GPS Anchor
-                const pAnchor = document.createElement('a-entity');
-                pAnchor.setAttribute('gps-new-entity-place', `latitude: ${sunLat + latOffset}; longitude: ${sunLon + lonOffset}`);
+/* Yaw-only billboard: labels stay upright and readable, never pitch. */
+AFRAME.registerComponent('billboard', {
+  init(){ this._p = new THREE.Vector3(); this._c = new THREE.Vector3(); },
+  tick(){
+    const cam = this.el.sceneEl.camera; if (!cam) return;
+    this.el.object3D.getWorldPosition(this._p);
+    cam.getWorldPosition(this._c);
+    this._c.y = this._p.y;                    // lock pitch
+    this.el.object3D.lookAt(this._c);
+    this.el.object3D.rotateY(Math.PI);        // a-text faces +Z
+  }
+});
 
-                // Planet Eye-Level Wrapper
-                const pWrapper = document.createElement('a-entity');
-                pWrapper.setAttribute('position', '0 1.6 0');
+/* ==================================================================
+   4. SCENE CONSTRUCTION
+   ================================================================== */
+const $ = id => document.getElementById(id);
+const el = (tag, attrs) => { const e = document.createElement(tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
 
-                const scaledRadius = (planet.diameter * SCALE_FACTOR) / 2;
-                const core = document.createElement('a-sphere');
-                core.setAttribute('radius', scaledRadius.toFixed(6));
-                core.setAttribute('color', planet.color);
+let sceneEl = null, sunOrigin = null, placedAt = null;
+let orbitsOn = true, halosOn = true, simMode = false;
+const targets = [];   // {name, color, node, rFromSun}
 
-                const haloRadius = Math.max(0.25, r_meters / 35); 
-                const halo = document.createElement('a-sphere');
-                halo.setAttribute('radius', haloRadius.toFixed(3));
-                halo.setAttribute('material', `color: ${planet.color}; opacity: 0.4; transparent: true; blending: additive; side: back`);
+function buildScene(lat, lon){
+  if (sceneEl){ sceneEl.parentNode.removeChild(sceneEl); sceneEl = null; targets.length = 0; }
 
-                const textScale = Math.min(Math.max(1, r_meters / 20), 8);
-                const text = document.createElement('a-text');
-                text.setAttribute('value', planet.name);
-                text.setAttribute('align', 'center');
-                text.setAttribute('color', '#ffffff');
-                text.setAttribute('scale', `${textScale} ${textScale} ${textScale}`);
-                text.setAttribute('position', `0 ${haloRadius + (textScale * 0.15)} 0`);
-                text.setAttribute('look-at', '[gps-new-camera]');
+  const now = new Date();
+  const sunLL = offsetToLatLon(lat, lon, 0, CFG.SUN_OFFSET_N);
+  sunOrigin = sunLL; placedAt = now;
 
-                pWrapper.appendChild(core);
-                pWrapper.appendChild(halo);
-                pWrapper.appendChild(text);
-                pAnchor.appendChild(pWrapper);
-                scene.appendChild(pAnchor);
+  sceneEl = el('a-scene', {
+    'vr-mode-ui'                      : 'enabled: false',
+    'device-orientation-permission-ui': 'enabled: false',
+    'embedded'                        : '',
+    /* videoTexture:true is mandatory for location-based AR — without it the
+       video plane clips anything more than a few metres out, i.e. everything. */
+    'arjs'    : 'sourceType: webcam; videoTexture: true; debugUIEnabled: false',
+    /* logarithmicDepthBuffer keeps a 2 mm sphere and a 678 m ring in the same
+       depth buffer without z-fighting. */
+    'renderer': 'antialias: true; alpha: true; logarithmicDepthBuffer: true; colorManagement: true; sortObjects: true'
+  });
 
-                // Orbit Rings attached to the Sun Wrapper (so they also float at 1.6m)
-                const orbitRing = document.createElement('a-torus');
-                orbitRing.setAttribute('radius', r_meters.toFixed(3));
-                orbitRing.setAttribute('radius-tubular', '0.005');
-                orbitRing.setAttribute('rotation', '90 0 0'); 
-                orbitRing.setAttribute('material', `color: ${planet.color}; opacity: 0.3; transparent: true; shader: flat;`);
-                
-                sunWrapper.appendChild(orbitRing);
-            });
-        }
-    </script>
+  /* ---- Camera ---- */
+  const camAttrs = {
+    'gps-new-camera': (simMode
+        ? `simulateLatitude: ${lat}; simulateLongitude: ${lon}; `
+        : '') + 'gpsMinDistance: 3; positionMinAccuracy: 200; alert: false',
+    'camera'   : 'near: 0.01; far: 60000',
+    'position' : '0 1.6 0',
+    'rotation-reader': ''
+  };
+  const cam = el('a-camera', camAttrs);
+  cam.addEventListener('gps-camera-update-position', e => {
+    const acc = e.detail && e.detail.position && e.detail.position.accuracy;
+    $('rFix').textContent = acc ? '±' + acc.toFixed(0) + ' m' : 'locked';
+  });
+  sceneEl.appendChild(cam);
+
+  /* ---- Sun (the anchor for everything) ---- */
+  const sunNode = el('a-entity', {
+    'gps-new-entity-place': `latitude: ${sunLL.lat}; longitude: ${sunLL.lon}`,
+    id: 'sun'
+  });
+
+  const sunGroup = el('a-entity', { position: `0 ${CFG.PLANET_Y} 0` });
+  sunGroup.appendChild(el('a-sphere', {
+    radius  : TARGET_SUN_DIAMETER_M / 2,
+    material: `shader: standard; color: #fff3d0; emissive: #ffb03a; emissiveIntensity: 1.4; roughness: 1; metalness: 0`
+  }));
+  sunGroup.appendChild(el('a-sphere', {   // corona
+    radius  : TARGET_SUN_DIAMETER_M * 1.6,
+    material: 'shader: flat; color: #ffb35c; opacity: 0.16; transparent: true; side: double; depthWrite: false'
+  }));
+  sunGroup.appendChild(makeLabel('SUN', 'volleyball · 21 cm', '#ffb35c', 0.42));
+  sunNode.appendChild(sunGroup);
+
+  /* ---- Orbit rings: children of the Sun, so their local metres are
+          already centred on the Sun's GPS coordinate ---- */
+  const orbits = el('a-entity', { id: 'orbits', position: `0 ${CFG.ORBIT_Y} 0` });
+  PLANETS.forEach(p => {
+    const r = p.a * M_PER_AU;
+    const w = THREE.MathUtils.clamp(r * 0.002, 0.04, 0.9);
+    orbits.appendChild(el('a-entity', {
+      geometry : `primitive: ring; radiusInner: ${r - w}; radiusOuter: ${r + w}; segmentsTheta: 256`,
+      material : `shader: flat; color: ${p.color}; opacity: 0.30; transparent: true; side: double; depthWrite: false`,
+      rotation : '-90 0 0'
+    }));
+  });
+  sunNode.appendChild(orbits);
+  sceneEl.appendChild(sunNode);
+
+  targets.push({ name:'Sun', color:'#ffb35c', node:sunGroup, rFromSun:0 });
+
+  /* ---- Planets ---- */
+  PLANETS.forEach(p => {
+    const o  = planetOffset(p, now);
+    const ll = offsetToLatLon(sunLL.lat, sunLL.lon, o.east, o.north);
+
+    const node  = el('a-entity', { 'gps-new-entity-place': `latitude: ${ll.lat}; longitude: ${ll.lon}` });
+    const group = el('a-entity', { position: `0 ${CFG.PLANET_Y + o.up} 0` });
+
+    // (a) the honest body — true scale, often sub-millimetre
+    group.appendChild(el('a-sphere', {
+      radius   : scaledRadius(p),
+      'segments-width': 24, 'segments-height': 16,
+      material : `shader: standard; color: ${p.color}; emissive: ${p.color}; emissiveIntensity: 0.55; roughness: 0.9`
+    }));
+
+    // (b) the findable wrapper — halo, beacon, label; all angular-compensated
+    const boost = el('a-entity', { 'angular-scale': `ref: ${CFG.HALO_REF_DIST}`, class: 'boost' });
+    boost.appendChild(el('a-sphere', {
+      radius   : CFG.HALO_DIAM / 2,
+      material : `shader: flat; color: ${p.color}; opacity: 0.22; transparent: true; side: double; depthWrite: false`
+    }));
+    boost.appendChild(el('a-cylinder', {   // vertical finder column
+      radius   : 0.012, height: CFG.BEACON_H, position: `0 ${CFG.BEACON_H/2} 0`,
+      material : `shader: flat; color: ${p.color}; opacity: 0.13; transparent: true; depthWrite: false`
+    }));
+    boost.appendChild(makeLabel(p.name.toUpperCase(),
+      `${fmtM(scaledRadius(p)*2)} wide · ${fmtM(o.r)} out`, p.color, 0.46));
+    group.appendChild(boost);
+
+    node.appendChild(group);
+    sceneEl.appendChild(node);
+    targets.push({ name:p.name, color:p.color, node:group, rFromSun:o.r });
+  });
+
+  document.body.appendChild(sceneEl);
+
+  $('launch').style.display = 'none';
+  $('hud').style.display    = 'block';
+  $('rScale').textContent   = '1 : ' + Math.round(1/SCALE).toLocaleString();
+  $('rEph').textContent     = ephemerisSource;
+  if (simMode) $('rFix').textContent = 'simulated';
+  renderTargetList();
+}
+
+function makeLabel(title, sub, color, y){
+  const wrap = el('a-entity', { position: `0 ${y} 0`, billboard: '' });
+  wrap.appendChild(el('a-text', {
+    value:title, align:'center', color:color, width:2.4, position:'0 0.10 0',
+    'letter-spacing':6, 'shader':'msdf', 'side':'double'
+  }));
+  wrap.appendChild(el('a-text', {
+    value:sub, align:'center', color:'#c6d5ea', width:1.5, opacity:0.8,
+    position:'0 -0.03 0', 'side':'double'
+  }));
+  return wrap;
+}
+
+/* ---- Live target list: distance from you to each body ---- */
+const _v = new THREE.Vector3(), _c = new THREE.Vector3();
+function renderTargetList(){
+  if (!sceneEl || !targets.length) return;
+  const cam = sceneEl.camera;
+  const rows = targets.map(t => {
+    let d = null;
+    if (cam && t.node.object3D){
+      t.node.object3D.getWorldPosition(_v); cam.getWorldPosition(_c);
+      d = _v.distanceTo(_c);
+    }
+    return { ...t, d };
+  }).sort((a,b) => (a.d ?? 1e12) - (b.d ?? 1e12));
+
+  $('targets').innerHTML = rows.map(r =>
+    `<div class="t"><b><i style="background:${r.color}"></i>${r.name}</b>` +
+    `<span>${r.d == null ? '—' : fmtM(r.d) + ' away'}</span></div>`
+  ).join('');
+}
+setInterval(renderTargetList, 1200);
+
+/* ==================================================================
+   5. PERMISSIONS + LAUNCH FLOW
+   ================================================================== */
+function toast(msg, ms){
+  const t = $('toast'); t.innerHTML = msg; t.style.display = 'block';
+  clearTimeout(toast._h); if (ms !== 0) toast._h = setTimeout(() => t.style.display='none', ms || 3200);
+}
+function launchError(msg){
+  $('launchErr').innerHTML = '<span class="err">' + msg + '</span>';
+  $('btnPlace').disabled = false;
+  $('btnPlace').textContent = 'Place Sun at My Location';
+}
+
+/* iOS 13+ gates motion sensors behind a user-gesture prompt. Android and
+   older iOS resolve immediately. */
+async function requestMotion(){
+  const ask = async C => {
+    if (typeof C !== 'undefined' && typeof C.requestPermission === 'function'){
+      const r = await C.requestPermission();
+      if (r !== 'granted') throw new Error('Motion & orientation access was denied. Enable it in Settings → Safari → Motion & Orientation Access, then reload.');
+    }
+  };
+  await ask(window.DeviceOrientationEvent);
+  try { await ask(window.DeviceMotionEvent); } catch(_){}
+}
+
+/* Prompt for the camera up front so failures surface as readable text
+   rather than a black screen inside AR.js. */
+async function primeCamera(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+    throw new Error('This browser has no camera API. Use Safari on iOS or Chrome on Android, over HTTPS.');
+  const s = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } }, audio:false });
+  s.getTracks().forEach(t => t.stop());   // release it for AR.js
+  await new Promise(r => setTimeout(r, 250));
+}
+
+function getFix(){
+  return new Promise((res, rej) => {
+    if (!navigator.geolocation) return rej(new Error('This browser has no geolocation API.'));
+    navigator.geolocation.getCurrentPosition(
+      p => res(p.coords),
+      e => rej(new Error({
+        1:'Location access was denied. Allow it for this site and try again.',
+        2:'No position available. Step outside for a clear view of the sky.',
+        3:'Location request timed out. Try again with a clearer sky view.'
+      }[e.code] || e.message)),
+      { enableHighAccuracy:true, timeout:20000, maximumAge:0 }
+    );
+  });
+}
+
+$('btnPlace').addEventListener('click', async () => {
+  const b = $('btnPlace'); b.disabled = true; $('launchErr').textContent = '';
+  try{
+    b.textContent = 'Requesting sensors…';   await requestMotion();
+    b.textContent = 'Requesting camera…';    await primeCamera();
+    b.textContent = 'Getting a GPS fix…';    const c = await getFix();
+    b.textContent = 'Placing the Sun…';
+    simMode = false;
+    buildScene(c.latitude, c.longitude);
+    toast(`Sun anchored at ${c.latitude.toFixed(6)}, ${c.longitude.toFixed(6)}<br>` +
+          `Fix accurate to ±${(c.accuracy||0).toFixed(0)} m.<br>` +
+          `Turn slowly and look for the coloured halos.`, 5200);
+  }catch(err){
+    console.error(err); launchError(err.message || String(err));
+  }
+});
+
+/* Desktop preview: simulated GPS, no sensors, so you can sanity-check
+   geometry before walking outside. */
+$('btnSim').addEventListener('click', () => {
+  simMode = true;
+  buildScene(-6.9175, 107.6191);   // Bandung, West Java — change freely
+  toast('Preview mode: simulated GPS, no live sensors.', 3600);
+});
+
+$('tOrbits').addEventListener('click', e => {
+  orbitsOn = !orbitsOn;
+  const o = sceneEl && sceneEl.querySelector('#orbits');
+  if (o) o.setAttribute('visible', orbitsOn);
+  e.currentTarget.classList.toggle('off', !orbitsOn);
+});
+$('tHalos').addEventListener('click', e => {
+  halosOn = !halosOn;
+  sceneEl && sceneEl.querySelectorAll('.boost').forEach(n => n.setAttribute('visible', halosOn));
+  e.currentTarget.classList.toggle('off', !halosOn);
+});
+$('tRecentre').addEventListener('click', async () => {
+  toast('Getting a fresh GPS fix…', 0);
+  try{ const c = await getFix(); buildScene(c.latitude, c.longitude);
+       toast('Sun re-placed. Ephemeris refreshed to now.', 3000); }
+  catch(err){ toast('<span class="err">' + err.message + '</span>', 4200); }
+});
+
+/* ==================================================================
+   6. LAUNCH-SCREEN LEDGER (derived, never hardcoded)
+   ================================================================== */
+(function ledger(){
+  const earth = PLANETS[2], nep = PLANETS[7];
+  const rows = [
+    ['Sun diameter',        `1,392,700 km → <b>${(TARGET_SUN_DIAMETER_M*100).toFixed(0)} cm</b>`],
+    ['Scale factor',        `1 : ${Math.round(1/SCALE).toLocaleString()}`],
+    ['1 astronomical unit', `${M_PER_AU.toFixed(2)} m`],
+    ['Earth',               `${fmtM(scaledRadius(earth)*2)} wide, ${fmtM(earth.a*M_PER_AU)} out`],
+    ['Neptune',             `${fmtM(scaledRadius(nep)*2)} wide, ${fmtM(nep.a*M_PER_AU)} out`],
+    ['Walk to the edge',    `about ${Math.round(nep.a*M_PER_AU/80)} min`]
+  ];
+  $('ledger').innerHTML = rows.map(([k,v]) =>
+    `<div><span>${k}</span><span>${v}</span></div>`).join('');
+  if (!window.Astronomy) $('launchErr').innerHTML =
+    '<span class="err">astronomy-engine did not load — positions will use the built-in approximation.</span>';
+})();
+</script>
 </body>
 </html>
