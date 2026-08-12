@@ -91,6 +91,11 @@
   #err{position:fixed;z-index:10;left:12px;right:12px;bottom:24px;padding:12px;font-size:12px;
     color:var(--warn);display:none}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  /* WebXR DOM-overlay mode: the XR layer draws the camera + scene,
+     so every opaque surface in the DOM has to get out of the way. */
+  html.xr, body.xr{background:transparent!important}
+  body.xr #gl, body.xr #cam{display:none!important}
 </style>
 </head>
 <body>
@@ -100,7 +105,7 @@
 <div id="ret"></div>
 <div id="guide"><svg viewBox="-60 -60 120 120"><circle r="52" fill="none" stroke="rgba(255,180,84,.35)" stroke-width="1"/><path id="gp" d="M0,-52 L7,-40 L-7,-40 Z" fill="#ffb454"/></svg></div>
 
-<div id="top" class="">
+<div id="top">
   <span><span class="k">Sun</span> <b id="sunsize">21 cm</b></span>
   <span><span class="k">1 AU</span> <b id="auout">22.6 m</b></span>
   <span id="fix"><span class="dot" id="fixdot"></span><span id="fixtxt">no fix</span></span>
@@ -128,8 +133,8 @@
   <div class="row"><label>Date &amp; time</label><input type="datetime-local" id="iDate"></div>
   <button class="act" id="btnLive">Return to live time</button>
   <button class="act" id="btnLink">Copy link to this Sun</button>
-  <p class="note">Anchor accuracy is limited by your phone's GPS, roughly ±5 m. Jupiter and beyond land reliably; the inner four are approximate. Set the anchor while standing still with a clear view of the sky, and give it thirty seconds to settle.</p>
-  <p class="note">Heading trim corrects a mis-calibrated compass. Stand at the Sun, point the phone at a landmark whose true bearing you know, and drag until it lines up. Or walk to where you believe a planet is and tap Align while aiming at it.</p>
+  <p class="note">With AR tracking active, the inner planets are held by the camera rather than by GPS, so they stay put to within centimetres. Sweep the phone slowly across textured ground for a few seconds before anchoring. Past Jupiter, tracking hands back to GPS.</p>
+  <p class="note">Heading trim rotates the whole model. Stand at the Sun, point the phone at a landmark whose true bearing you know, and drag until it lines up. Or pick a planet and tap Align while aiming at where it should be.</p>
 </div>
 
 <div id="intro">
@@ -224,8 +229,8 @@ function moonGeocentric(date){
   return [r*Math.cos(lat)*Math.cos(lon), r*Math.cos(lat)*Math.sin(lon), r*Math.sin(lat)];
 }
 
-/* Ecliptic → world.  X_ecl→North, Y_ecl→West, Z_ecl→Up.
-   World is three.js standard: +x East, +y Up, +z South.            */
+/* Ecliptic → model.  X_ecl→North, Y_ecl→West, Z_ecl→Up.
+   Model axes are three.js standard: +x East, +y Up, +z South.      */
 const eclToWorld = (p,s) => new THREE.Vector3(-p[1]*s, p[2]*s, -p[0]*s);
 
 /* ══════════════════════════════════════════════════════════════════
@@ -243,7 +248,8 @@ const S = {
   date:     new Date(),
   gps:      null, acc:null,
   target:   null,
-  hasOrient:false
+  hasOrient:false,
+  xrOK:     false
 };
 const scaleOf = () => S.sunDia / SUN_DIA_M;
 const auMeters = () => AU_M * scaleOf();
@@ -253,25 +259,30 @@ const fmtDia = m => m<0.01 ? (m*1000).toFixed(2)+' mm' : (m*100).toFixed(1)+' cm
 /* ══════════════════════════════════════════════════════════════════
    3. THREE.JS SCENE
    ══════════════════════════════════════════════════════════════════ */
-const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('gl'),alpha:true,antialias:true,logarithmicDepthBuffer:true});
+const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('gl'),alpha:true,antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.xr.enabled = true;
 const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(65, 1, 0.004, 8000);
+const camera = new THREE.PerspectiveCamera(65, 1, 0.01, 3000);
 scene.add(new THREE.AmbientLight(0xffffff,0.45));
-const sunLight = new THREE.PointLight(0xfff0d8, 3, 0, 0);
-scene.add(sunLight);
 
-const sunMesh = new THREE.Mesh(new THREE.SphereGeometry(1,48,32),
-  new THREE.MeshBasicMaterial({color:0xffcb70}));
-scene.add(sunMesh);
-const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex(),color:0xffb454,transparent:true,opacity:.55,depthWrite:false}));
-scene.add(sunGlow);
+/* In an XR session the camera pose belongs to the device's tracker and is
+   not ours to write. So the solar system lives in `world`, and we move
+   `world` to put the Sun where it belongs. Model coordinates inside the
+   group stay exactly as before: +x East, +y Up, +z South. */
+const world = new THREE.Group();
+const UP = new THREE.Vector3(0,1,0);
+scene.add(world);
+
+const sunLight = new THREE.PointLight(0xfff0d8, 3, 0, 0);
+world.add(sunLight);
 
 function glowTex(){
   const c=document.createElement('canvas'); c.width=c.height=128;
-  const g=c.getContext('2d').createRadialGradient(64,64,0,64,64,64);
+  const x=c.getContext('2d');
+  const g=x.createRadialGradient(64,64,0,64,64,64);
   g.addColorStop(0,'rgba(255,210,140,1)'); g.addColorStop(.35,'rgba(255,170,70,.45)'); g.addColorStop(1,'rgba(255,150,50,0)');
-  const x=c.getContext('2d'); x.fillStyle=g; x.fillRect(0,0,128,128);
+  x.fillStyle=g; x.fillRect(0,0,128,128);
   return new THREE.CanvasTexture(c);
 }
 function ringTex(hex){
@@ -291,6 +302,12 @@ function labelTex(text,hex){
   return new THREE.CanvasTexture(c);
 }
 
+const sunMesh = new THREE.Mesh(new THREE.SphereGeometry(1,48,32),
+  new THREE.MeshBasicMaterial({color:0xffcb70}));
+world.add(sunMesh);
+const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex(),color:0xffb454,transparent:true,opacity:.55,depthWrite:false}));
+world.add(sunGlow);
+
 const objs = BODIES.map(b=>{
   const hex = '#'+b.col.toString(16).padStart(6,'0');
   const g = new THREE.Group();
@@ -308,15 +325,15 @@ const objs = BODIES.map(b=>{
   if(b.n==='Earth'){
     moon = new THREE.Mesh(new THREE.SphereGeometry(1,16,12),
       new THREE.MeshStandardMaterial({color:0xbdbdb8,roughness:1}));
-    scene.add(moon);
+    world.add(moon);
   }
   const beacon = new THREE.Sprite(new THREE.SpriteMaterial({map:ringTex(hex),transparent:true,depthTest:false,depthWrite:false,opacity:.85}));
   const label  = new THREE.Sprite(new THREE.SpriteMaterial({map:labelTex(b.n,hex),transparent:true,depthTest:false,depthWrite:false,opacity:.9}));
   beacon.renderOrder=10; label.renderOrder=11;
-  scene.add(g,beacon,label);
+  world.add(g,beacon,label);
   const orbit = new THREE.LineLoop(new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({color:b.col,transparent:true,opacity:.3}));
-  scene.add(orbit);
+  world.add(orbit);
   return {b,g,body,ring,moon,beacon,label,orbit,pos:new THREE.Vector3(),hex};
 });
 
@@ -343,7 +360,7 @@ function rebuild(){
   });
   document.getElementById('sunsize').textContent = fmtDia(S.sunDia);
   document.getElementById('auout').textContent   = au.toFixed(1)+' m';
-  drawChips();
+  if(!chips.children.length) drawChips();
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -361,13 +378,22 @@ function onOrient(ev){
   orient.a = compassHeading!=null ? 360-compassHeading : ev.alpha;
   orient.b = ev.beta; orient.g = ev.gamma;
 }
+const compassQ = new THREE.Quaternion();
+function compassQuat(){
+  euler.set(orient.b*D2R, orient.a*D2R, -orient.g*D2R, 'YXZ');
+  compassQ.setFromEuler(euler);
+  compassQ.multiply(q1);
+  compassQ.multiply(q0.setFromAxisAngle(zee,-screenAngle*D2R));
+  return compassQ;
+}
+function yawOf(quat){
+  const f = new THREE.Vector3(0,0,-1).applyQuaternion(quat);
+  return Math.atan2(f.x, -f.z);
+}
 function applyOrientation(){
   if(!S.hasOrient) return;
-  euler.set(orient.b*D2R, orient.a*D2R, -orient.g*D2R, 'YXZ');
-  camera.quaternion.setFromEuler(euler);
-  camera.quaternion.multiply(q1);
-  camera.quaternion.multiply(q0.setFromAxisAngle(zee,-screenAngle*D2R));
-  qTrim.setFromAxisAngle(new THREE.Vector3(0,1,0), S.headTrim*D2R);
+  camera.quaternion.copy(compassQuat());
+  qTrim.setFromAxisAngle(UP, S.headTrim*D2R);
   camera.quaternion.premultiply(qTrim);
 }
 addEventListener('orientationchange',()=>{screenAngle = screen.orientation ? screen.orientation.angle : (window.orientation||0);});
@@ -394,7 +420,6 @@ function startGPS(){
     S.acc=p.coords.accuracy;
     if(!S.origin){ S.origin={...S.gps}; syncInputs(); }
     const t=enu();
-    // heavier smoothing when the fix is poor
     const k = S.acc>15 ? 0.06 : S.acc>8 ? 0.12 : 0.25;
     smooth = smooth ? {e:smooth.e+(t.e-smooth.e)*k, n:smooth.n+(t.n-smooth.n)*k} : t;
     updateFix();
@@ -403,8 +428,87 @@ function startGPS(){
 }
 function updateFix(){
   const ok = S.acc!=null && S.acc<=10;
-  document.getElementById('fixdot').className = 'dot'+(ok?' ok':'');
-  document.getElementById('fixtxt').textContent = S.acc==null?'no fix':'±'+S.acc.toFixed(0)+' m';
+  document.getElementById('fixdot').className = 'dot'+((ok||(xrSession&&anchor.set))?' ok':'');
+  document.getElementById('fixtxt').textContent =
+    (xrSession && anchor.set) ? 'AR lock' :
+    S.acc==null ? 'no fix' : '±'+S.acc.toFixed(0)+' m';
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   4b. XR TRACKING
+   The device's visual-inertial odometry replaces GPS near the Sun.
+   Drift is roughly 1% of distance walked, so the inner planets land
+   within centimetres. Past ~80 m we fade back to GPS, which does not
+   drift but is coarse — exactly the opposite failure mode.
+   ══════════════════════════════════════════════════════════════════ */
+const viewerPos = new THREE.Vector3(), viewerQuat = new THREE.Quaternion();
+let xrSession=null, refSpace=null, poseReady=false;
+navigator.xr?.isSessionSupported('immersive-ar').then(v=>{S.xrOK=v;}).catch(()=>{});
+
+const anchor = {pos:new THREE.Vector3(), theta:0, set:false};
+
+async function startXR(){
+  xrSession = await navigator.xr.requestSession('immersive-ar',{
+    requiredFeatures:['local-floor'],
+    optionalFeatures:['dom-overlay'],
+    domOverlay:{root:document.body}
+  });
+  renderer.xr.setReferenceSpaceType('local-floor');
+  await renderer.xr.setSession(xrSession);
+  xrSession.updateRenderState({depthNear:0.01, depthFar:3000});
+  refSpace = renderer.xr.getReferenceSpace();
+  xrSession.addEventListener('end', ()=>{
+    xrSession=null; refSpace=null; poseReady=false;
+    document.documentElement.classList.remove('xr');
+    document.body.classList.remove('xr');
+  });
+  document.documentElement.classList.add('xr');
+  document.body.classList.add('xr');
+}
+
+/* Position the model inside the XR tracking frame each frame. */
+const tA = new THREE.Vector3();
+function placeWorldXR(){
+  if(!anchor.set){                       // not anchored yet — park it underfoot
+    world.rotation.y = S.headTrim*D2R;
+    world.position.set(viewerPos.x, S.plane, viewerPos.z);
+    return;
+  }
+  const th = anchor.theta + S.headTrim*D2R;
+  world.rotation.y = th;
+
+  // Where the tracker thinks we are, in metres East/North of the Sun
+  tA.copy(viewerPos).sub(anchor.pos).applyAxisAngle(UP, -th);
+  const eX = tA.x, nX = -tA.z;
+  let e = eX, n = nX;
+
+  // Beyond 80 m, hand over to GPS; fully GPS by 200 m
+  if(smooth && S.origin){
+    const w = Math.min(1, Math.max(0, (Math.hypot(eX,nX)-80)/120));
+    e = eX + (smooth.e - eX)*w;
+    n = nX + (smooth.n - nX)*w;
+  }
+  // Solve world.position so the camera lands at (e,n) in model coordinates
+  tA.set(eX-e, 0, -(nX-n)).applyAxisAngle(UP, th).add(anchor.pos);
+  world.position.set(tA.x, S.plane, tA.z);
+}
+
+function anchorHere(){
+  if(xrSession){
+    if(!poseReady) return fail('Tracking not ready. Aim at the ground and move slowly.');
+    anchor.pos.copy(viewerPos); anchor.pos.y = 0;
+    anchor.theta = S.hasOrient ? (yawOf(compassQuat()) - yawOf(viewerQuat)) : 0;
+    anchor.set = true;
+    if(S.gps){ S.origin = {...S.gps}; syncInputs(); }
+    smooth = {e:0,n:0};
+    updateFix();
+    fail(S.hasOrient ? 'Sun anchored. Tracking from here.'
+                     : 'Sun anchored. No compass — use Align to set north.');
+  } else {
+    if(!S.gps) return fail('Waiting for a location fix.');
+    S.origin = {...S.gps}; smooth = {e:0,n:0}; syncInputs();
+    fail('Sun anchored where you stand.');
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -422,9 +526,9 @@ function drawChips(){
   });
 }
 const guide = document.getElementById('guide'), gp = document.getElementById('gp');
-const tmp = new THREE.Vector3();
 
 function resize(){
+  if(renderer.xr.isPresenting) return;
   const w=innerWidth,h=innerHeight;
   renderer.setSize(w,h,false);
   camera.aspect=w/h; camera.updateProjectionMatrix();
@@ -432,38 +536,55 @@ function resize(){
 addEventListener('resize',resize); resize();
 
 let lastRecalc=0;
-function frame(t){
-  requestAnimationFrame(frame);
+const tB = new THREE.Vector3(), tQ = new THREE.Quaternion(), tC = new THREE.Vector3();
+
+function frame(t, xrFrame){
   if(S.live && t-lastRecalc>10000){ S.date=new Date(); rebuild(); lastRecalc=t; }
 
-  applyOrientation();
-  const p = smooth || {e:0,n:0};
-  camera.position.set(p.e, S.eye - S.plane, -p.n);
+  if(xrFrame && refSpace){
+    const pose = xrFrame.getViewerPose(refSpace);
+    if(pose){
+      const p = pose.transform.position, o = pose.transform.orientation;
+      viewerPos.set(p.x,p.y,p.z);
+      viewerQuat.set(o.x,o.y,o.z,o.w);
+      poseReady = true;
+    }
+    placeWorldXR();
+  } else {
+    applyOrientation();
+    const p = smooth || {e:0,n:0};
+    camera.position.set(p.e, S.eye - S.plane, -p.n);
+    viewerPos.copy(camera.position);
+    viewerQuat.copy(camera.quaternion);
+    world.position.set(0,0,0);
+    world.rotation.set(0,0,0);
+  }
+  world.updateMatrixWorld(true);
 
-  const vfovTan = Math.tan(camera.fov*D2R/2);
+  // Camera position expressed in model coordinates, so distances stay honest
+  const camLocal = world.worldToLocal(tB.copy(viewerPos));
+
   objs.forEach(o=>{
-    const dist = camera.position.distanceTo(o.pos);
-    // beacon & label keep a constant angular size
-    const k = dist * vfovTan * 0.09 * S.beacon;
+    const dist = camLocal.distanceTo(o.pos);
+    const k = dist * 0.06 * S.beacon;      // constant angular size on screen
     o.beacon.position.copy(o.pos);
     o.beacon.scale.setScalar(k*2);
     o.beacon.visible = S.beacon>0.01;
     o.label.position.copy(o.pos).y += k*1.9;
-    o.label.scale.set(k*3.4,k*0.85,1);
-    o.label.visible  = S.beacon>0.01;
-    o.orbit.visible  = true;
+    o.label.scale.set(k*3.4, k*0.85, 1);
+    o.label.visible = S.beacon>0.01;
     if(o.chip) o.chip.querySelector('[data-d]').textContent = fmt(dist);
   });
-  sunLight.position.set(0,0,0);
 
-  // off-screen guide arrow toward the chosen target
   if(S.target){
-    tmp.copy(S.target.pos).project(camera);
-    const onScreen = tmp.z<1 && Math.abs(tmp.x)<0.95 && Math.abs(tmp.y)<0.95;
-    guide.style.display = onScreen?'none':'block';
+    const rel = S.target.g.getWorldPosition(tC)
+      .sub(viewerPos).applyQuaternion(tQ.copy(viewerQuat).invert());
+    const behind = rel.z > 0;
+    const onScreen = !behind && Math.abs(rel.x/rel.z)<0.75 && Math.abs(rel.y/rel.z)<0.75;
+    guide.style.display = onScreen ? 'none' : 'block';
     if(!onScreen){
-      let ang = Math.atan2(tmp.x, tmp.y);
-      if(tmp.z>1) ang += Math.PI;
+      let ang = Math.atan2(rel.x, rel.y);
+      if(behind) ang += Math.PI;
       gp.setAttribute('transform',`rotate(${ang*180/Math.PI})`);
     }
   } else guide.style.display='none';
@@ -506,17 +627,15 @@ $('btnLink').onclick = ()=>{
   const u=`${location.origin}${location.pathname}?lat=${S.origin.lat.toFixed(7)}&lon=${S.origin.lon.toFixed(7)}&sun=${S.sunDia}&h=${S.plane}&trim=${S.headTrim}`;
   navigator.clipboard?.writeText(u).then(()=>fail('Link copied.'),()=>prompt('Copy this link:',u));
 };
-$('btnAnchor').onclick = ()=>{
-  if(!S.gps) return fail('Waiting for a location fix.');
-  S.origin={...S.gps}; smooth={e:0,n:0}; syncInputs(); fail('Sun anchored where you stand.');
-};
+$('btnAnchor').onclick = anchorHere;
 $('btnAlign').onclick = ()=>{
   if(!S.target) return fail('Pick a planet first, then aim at it.');
-  const d = new THREE.Vector3().subVectors(S.target.pos,camera.position);
+  const d = S.target.g.getWorldPosition(new THREE.Vector3()).sub(viewerPos);
   const want = Math.atan2(d.x,-d.z);
-  const fwd  = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-  const have = Math.atan2(fwd.x,-fwd.z);
-  let delta = (want-have)/D2R; delta=((delta+180)%360+360)%360-180;
+  const have = yawOf(viewerQuat);
+  // In XR the model rotates under a fixed camera; outside XR the camera rotates.
+  let delta = (xrSession ? (want-have) : (have-want))/D2R;
+  delta = ((delta+180)%360+360)%360-180;
   S.headTrim = Math.max(-180,Math.min(180,S.headTrim+delta));
   $('sHead').value=S.headTrim; $('oHead').textContent=S.headTrim.toFixed(1)+'°';
   fail('Heading trimmed to '+S.headTrim.toFixed(1)+'°.');
@@ -536,26 +655,32 @@ $('close').onclick  = ()=>$('sheet').classList.remove('open');
 
 /* ── permissions + start ───────────────────────────────────────── */
 $('go').onclick = async ()=>{
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920}},audio:false});
-    $('cam').srcObject = stream;
-  }catch(e){ fail('Camera blocked — the model still works, without the view.'); }
+  $('intro').style.display='none';
+  rebuild(); syncInputs();
+  renderer.setAnimationLoop(frame);
+
+  // requestSession must run inside the tap, before any await that could
+  // consume the gesture — so XR goes first and everything else follows.
+  if(S.xrOK){
+    try{ await startXR(); }
+    catch(e){ S.xrOK=false; fail('AR session refused. Falling back to compass mode.'); }
+  }
+  if(!S.xrOK){
+    try{
+      $('cam').srcObject = await navigator.mediaDevices.getUserMedia(
+        {video:{facingMode:{ideal:'environment'},width:{ideal:1920}},audio:false});
+    }catch(e){ fail('Camera blocked — the model still works, without the view.'); }
+  }
 
   try{
-    if(typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission){
-      const r = await DeviceOrientationEvent.requestPermission();
-      if(r!=='granted') fail('Motion access denied — the compass will not work.');
-    }
+    if(typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission)
+      await DeviceOrientationEvent.requestPermission();
   }catch(e){}
   addEventListener('deviceorientationabsolute', onOrient, true);
   addEventListener('deviceorientation', onOrient, true);
 
   startGPS();
-  setTimeout(()=>{ if(!S.hasOrient) enableDesktop(); },2500);
-
-  $('intro').style.display='none';
-  rebuild(); syncInputs();
-  requestAnimationFrame(frame);
+  setTimeout(()=>{ if(!S.hasOrient && !xrSession) enableDesktop(); }, 2500);
 };
 
 /* ── desktop fallback: drag to look, WASD to walk ──────────────── */
