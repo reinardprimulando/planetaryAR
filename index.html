@@ -142,15 +142,16 @@ const SCALE                  = TARGET_SUN_DIAMETER_M / (SUN_DIAMETER_KM * 1000);
 const AU_KM                  = 149597870.7;
 const M_PER_AU               = AU_KM * 1000 * SCALE;   
 
+/* ---- Tunables ---- */
 const CFG = {
-  PLANET_Y      : 1.6,    
-  ORBIT_Y       : 0.05,   
-  HALO_DIAM     : 0.5,    
-  HALO_REF_DIST : 14,     
-  HALO_MAX      : 45,     
-  BEACON_H      : 3.0,    
-  SUN_OFFSET_N  : 0,      
-  FLATTEN       : false   
+  PLANET_Y      : 1.6,    // planets at eye height so they sit on the horizon line
+  ORBIT_Y       : 0.05,   // orbit rings hug the ground
+  HALO_DIAM     : 0.5,    // base halo diameter (m) before angular compensation
+  HALO_REF_DIST : 14,     // distance (m) at which halo renders at base size
+  HALO_MAX      : 45,     // clamp so Neptune's halo doesn't eat the sky
+  BEACON_H      : 3.0,    // vertical finder column height (m) before compensation
+  SUN_OFFSET_N  : 3,      // <-- CHANGE THIS: Pushes the Sun 3 meters in front of you
+  FLATTEN       : false   // true = force all planets onto one flat plane, ignoring inclination
 };
 
 const PLANETS = [
