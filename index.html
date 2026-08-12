@@ -14,7 +14,12 @@
     <script src="https://unpkg.com/astronomy-engine@2.1.19/astronomy.browser.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #000; }
+        /* FIX 1: Removed background-color to ensure the AR webcam feed is visible */
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: sans-serif; 
+        }
         
         #ui-container {
             position: absolute;
@@ -67,14 +72,11 @@
         <button id="place-btn">Place Sun at My Location</button>
     </div>
 
-    <!-- AR Scene (logarithmicDepthBuffer is crucial for viewing distant planets without Z-fighting) -->
-    <a-scene 
-        vr-mode-ui="enabled: false" 
-        renderer="logarithmicDepthBuffer: true; antialias: true;"
-        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+    <!-- FIX 1 & 3: Exact requested scene tag with alpha:true and camera setup -->
+    <a-scene vr-mode-ui="enabled: false" arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;" renderer="antialias: true; alpha: true">
         
-        <!-- The GPS Camera ensures our local 3D origin updates relative to our real-world movement -->
-        <a-camera gps-new-camera="gpsMinDistance: 1" far="5000"></a-camera>
+        <!-- Camera strictly configured to track physical movement via GPS -->
+        <a-camera gps-new-camera="gpsMinDistance: 1;"></a-camera>
         
     </a-scene>
 
@@ -84,7 +86,7 @@
         const TARGET_SUN_DIAMETER_M = 0.21;
         const SCALE_FACTOR = TARGET_SUN_DIAMETER_M / REAL_SUN_DIAMETER_M;
         const AU_IN_METERS = 149597870700;
-        const SCALED_AU_M = AU_IN_METERS * SCALE_FACTOR; // ~22.55 meters
+        const SCALED_AU_M = AU_IN_METERS * SCALE_FACTOR;
 
         // Planetary Data (Diameters in meters)
         const planets = [
@@ -102,7 +104,7 @@
         const scene = document.querySelector('a-scene');
 
         placeBtn.addEventListener('click', async () => {
-            // Handle iOS 13+ Device Orientation Permissions for Look Controls
+            // Handle iOS 13+ Device Orientation Permissions
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const permissionState = await DeviceOrientationEvent.requestPermission();
@@ -118,25 +120,31 @@
             placeBtn.innerText = "Acquiring GPS...";
             placeBtn.disabled = true;
 
-            // Get high-accuracy GPS
+            // FIX 2: Get user's real GPS location to anchor the system
             navigator.geolocation.getCurrentPosition(
                 (position) => {
                     placeBtn.style.display = 'none';
                     buildSolarSystem(position.coords.latitude, position.coords.longitude);
                 },
                 (error) => {
-                    alert("GPS Error: " + error.message);
-                    placeBtn.innerText = "Place Sun at My Location";
-                    placeBtn.disabled = false;
+                    console.warn("GPS Error:", error);
+                    const useMock = confirm(`GPS Error: ${error.message}\n\nWould you like to use a mock location to test the AR view?`);
+                    if (useMock) {
+                        placeBtn.style.display = 'none';
+                        buildSolarSystem(0, 0); 
+                    } else {
+                        placeBtn.innerText = "Place Sun at My Location";
+                        placeBtn.disabled = false;
+                    }
                 },
-                { enableHighAccuracy: true, maximumAge: 0 }
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
             );
         });
 
         function buildSolarSystem(sunLat, sunLon) {
             document.getElementById('info-panel').innerHTML += `<br><small>Sun anchored at your feet!</small>`;
 
-            // 1. PLACE THE SUN
+            // FIX 2: Place the Sun using ONLY absolute GPS coordinates (no generic 0 0 -5 local positions)
             const sunEntity = document.createElement('a-entity');
             sunEntity.setAttribute('gps-new-entity-place', `latitude: ${sunLat}; longitude: ${sunLon}`);
             
@@ -146,22 +154,20 @@
             sunEntity.appendChild(sunSphere);
             scene.appendChild(sunEntity);
 
-            // 2. CALCULATE AND PLACE PLANETS
             const astroTime = new Astronomy.AstroTime(new Date());
 
             planets.forEach(planet => {
-                // Get 3D Heliocentric Coordinates (in AU) for today's date
+                // Get 3D Heliocentric Coordinates
                 const vec = Astronomy.HelioVector(Astronomy.Body[planet.body], astroTime);
                 
-                // Convert AU to Scaled Meters
+                // Convert to scaled meters
                 const x_meters = vec.x * SCALED_AU_M;
                 const y_meters = vec.y * SCALED_AU_M;
-                const z_meters = vec.z * SCALED_AU_M; // Z is technically up/down in astronomy, but we'll use X & Y to map to the ground plane (East & North)
+                const z_meters = vec.z * SCALED_AU_M;
                 
-                // Calculate absolute 3D distance for accurate orbit ring scaling
                 const r_meters = Math.sqrt(x_meters**2 + y_meters**2 + z_meters**2);
 
-                // GPS Offset Math (roughly 1 meter = 0.00000898 degrees, adjusted for longitude via cosine of latitude)
+                // FIX 2: Calculate specific GPS offsets for each planet
                 const METERS_PER_DEG_LAT = 111320;
                 const latOffset = y_meters / METERS_PER_DEG_LAT;
                 const lonOffset = x_meters / (METERS_PER_DEG_LAT * Math.cos(sunLat * (Math.PI / 180)));
@@ -169,32 +175,30 @@
                 const planetLat = sunLat + latOffset;
                 const planetLon = sunLon + lonOffset;
 
-                // Create Planet GPS Entity
+                // Create Planet using ONLY absolute GPS coordinates
                 const pEntity = document.createElement('a-entity');
                 pEntity.setAttribute('gps-new-entity-place', `latitude: ${planetLat}; longitude: ${planetLon}`);
 
-                // The accurate physical sphere (Earth will literally be ~1.9mm!)
+                // Scaled Core
                 const scaledRadius = (planet.diameter * SCALE_FACTOR) / 2;
                 const core = document.createElement('a-sphere');
                 core.setAttribute('radius', scaledRadius.toFixed(6));
                 core.setAttribute('color', planet.color);
 
-                // --- VISIBILITY FIXES ---
-                // Distant planets (like Neptune ~670m away) need larger halos to be seen. 
-                // We dynamically scale the halo radius based on distance.
+                // Visibility Halo
                 const haloRadius = Math.max(0.25, r_meters / 35); 
                 const halo = document.createElement('a-sphere');
                 halo.setAttribute('radius', haloRadius.toFixed(3));
                 halo.setAttribute('material', `color: ${planet.color}; opacity: 0.4; transparent: true; blending: additive; side: back`);
 
-                // Floating Text Label
-                const textScale = Math.max(2, r_meters / 10); // Scale text up for distant planets
+                // Text Label (positioned relative to the GPS-anchored planet entity, NOT the camera)
+                const textScale = Math.max(2, r_meters / 10);
                 const text = document.createElement('a-text');
                 text.setAttribute('value', planet.name);
                 text.setAttribute('align', 'center');
                 text.setAttribute('color', '#ffffff');
                 text.setAttribute('scale', `${textScale} ${textScale} ${textScale}`);
-                text.setAttribute('position', `0 ${haloRadius + (textScale * 0.15)} 0`); // Float above halo
+                text.setAttribute('position', `0 ${haloRadius + (textScale * 0.15)} 0`);
                 text.setAttribute('look-at', '[gps-new-camera]');
 
                 pEntity.appendChild(core);
@@ -202,12 +206,11 @@
                 pEntity.appendChild(text);
                 scene.appendChild(pEntity);
 
-                // --- ORBIT LINES ---
-                // By drawing a flat torus directly on the Sun's GPS entity, it perfectly intersects the planets!
+                // Orbit Line
                 const orbitRing = document.createElement('a-torus');
                 orbitRing.setAttribute('radius', r_meters.toFixed(3));
                 orbitRing.setAttribute('radius-tubular', '0.02');
-                orbitRing.setAttribute('rotation', '90 0 0'); // Flattens it against the XZ ground plane
+                orbitRing.setAttribute('rotation', '90 0 0'); 
                 orbitRing.setAttribute('material', `color: ${planet.color}; opacity: 0.3; transparent: true; shader: flat;`);
                 
                 sunEntity.appendChild(orbitRing);
