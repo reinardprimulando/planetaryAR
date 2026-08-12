@@ -9,14 +9,13 @@
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://unpkg.com/aframe-look-at-component@1.0.0/dist/aframe-look-at-component.min.js"></script>
     
-    <!-- FIX 1: Switched to the FULL AR.js build to guarantee webcam initialization -->
+    <!-- Full AR.js build for Webcam Support -->
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
     
     <!-- Astronomy Engine -->
     <script src="https://unpkg.com/astronomy-engine@2.1.19/astronomy.browser.js"></script>
 
     <style>
-        /* Force transparent backgrounds to ensure video feed passes through */
         body, html { 
             margin: 0; 
             padding: 0;
@@ -76,13 +75,12 @@
         <button id="place-btn">Place Sun Near Me</button>
     </div>
 
-    <!-- Added clearColor: transparent to ensure the canvas doesn't render a white wall -->
     <a-scene vr-mode-ui="enabled: false" arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;" renderer="antialias: true; alpha: true; clearColor: transparent;">
-        <a-camera gps-new-camera="gpsMinDistance: 1;"></a-camera>
+        <!-- FIX 3: Expanded Far Plane to 20,000 meters to prevent distant culling -->
+        <a-camera gps-new-camera="gpsMinDistance: 1;" far="20000"></a-camera>
     </a-scene>
 
     <script>
-        // Constants & Scale Math
         const REAL_SUN_DIAMETER_M = 1392700000;
         const TARGET_SUN_DIAMETER_M = 0.21;
         const SCALE_FACTOR = TARGET_SUN_DIAMETER_M / REAL_SUN_DIAMETER_M;
@@ -90,7 +88,6 @@
         const SCALED_AU_M = AU_IN_METERS * SCALE_FACTOR;
         const METERS_PER_DEG_LAT = 111320;
 
-        // Planetary Data
         const planets = [
             { name: 'Mercury', body: 'Mercury', diameter: 4880000, color: '#a8a8a8' },
             { name: 'Venus',   body: 'Venus',   diameter: 12104000, color: '#e0ce8d' },
@@ -124,20 +121,35 @@
         });
 
         function buildSolarSystem(position) {
-            // FIX 2: Offset the Sun 4 meters NORTH of the user so you aren't standing inside it.
-            const sunLat = position.coords.latitude + (4 / METERS_PER_DEG_LAT);
+            // Anchor 3 meters North
+            const sunLat = position.coords.latitude + (3 / METERS_PER_DEG_LAT);
             const sunLon = position.coords.longitude;
 
-            document.getElementById('info-panel').innerHTML += `<br><small>Sun placed 4 meters in front of you!</small>`;
+            document.getElementById('info-panel').innerHTML += `<br><small style="color:#ff5555;">Look around for the giant RED PILLAR!</small>`;
 
-            const sunEntity = document.createElement('a-entity');
-            sunEntity.setAttribute('gps-new-entity-place', `latitude: ${sunLat}; longitude: ${sunLon}`);
+            // 1. ABSOLUTE GPS ANCHOR
+            const sunAnchor = document.createElement('a-entity');
+            sunAnchor.setAttribute('gps-new-entity-place', `latitude: ${sunLat}; longitude: ${sunLon}`);
             
+            // 2. EYE-LEVEL WRAPPER (Fixes sinking into the floor)
+            const sunWrapper = document.createElement('a-entity');
+            sunWrapper.setAttribute('position', '0 1.6 0'); // Elevate 1.6 meters
+
+            // The Sun Sphere
             const sunSphere = document.createElement('a-sphere');
             sunSphere.setAttribute('radius', (TARGET_SUN_DIAMETER_M / 2).toFixed(4));
             sunSphere.setAttribute('material', 'color: #ffcc00; emissive: #ffaa00; emissiveIntensity: 0.5');
-            sunEntity.appendChild(sunSphere);
-            scene.appendChild(sunEntity);
+            
+            // FIX 1: THE GIANT RED LOCATOR BEAM
+            const locator = document.createElement('a-cylinder');
+            locator.setAttribute('radius', '0.05');
+            locator.setAttribute('height', '200'); // 200 meters tall!
+            locator.setAttribute('material', 'color: red; opacity: 0.6; transparent: true;');
+
+            sunWrapper.appendChild(sunSphere);
+            sunWrapper.appendChild(locator);
+            sunAnchor.appendChild(sunWrapper);
+            scene.appendChild(sunAnchor);
 
             const astroTime = new Astronomy.AstroTime(new Date());
 
@@ -153,8 +165,13 @@
                 const latOffset = y_meters / METERS_PER_DEG_LAT;
                 const lonOffset = x_meters / (METERS_PER_DEG_LAT * Math.cos(sunLat * (Math.PI / 180)));
 
-                const pEntity = document.createElement('a-entity');
-                pEntity.setAttribute('gps-new-entity-place', `latitude: ${sunLat + latOffset}; longitude: ${sunLon + lonOffset}`);
+                // Planet GPS Anchor
+                const pAnchor = document.createElement('a-entity');
+                pAnchor.setAttribute('gps-new-entity-place', `latitude: ${sunLat + latOffset}; longitude: ${sunLon + lonOffset}`);
+
+                // Planet Eye-Level Wrapper
+                const pWrapper = document.createElement('a-entity');
+                pWrapper.setAttribute('position', '0 1.6 0');
 
                 const scaledRadius = (planet.diameter * SCALE_FACTOR) / 2;
                 const core = document.createElement('a-sphere');
@@ -166,7 +183,6 @@
                 halo.setAttribute('radius', haloRadius.toFixed(3));
                 halo.setAttribute('material', `color: ${planet.color}; opacity: 0.4; transparent: true; blending: additive; side: back`);
 
-                // FIX 3: Strictly cap the maximum scale of the text so it doesn't blow out the screen
                 const textScale = Math.min(Math.max(1, r_meters / 20), 8);
                 const text = document.createElement('a-text');
                 text.setAttribute('value', planet.name);
@@ -176,19 +192,20 @@
                 text.setAttribute('position', `0 ${haloRadius + (textScale * 0.15)} 0`);
                 text.setAttribute('look-at', '[gps-new-camera]');
 
-                pEntity.appendChild(core);
-                pEntity.appendChild(halo);
-                pEntity.appendChild(text);
-                scene.appendChild(pEntity);
+                pWrapper.appendChild(core);
+                pWrapper.appendChild(halo);
+                pWrapper.appendChild(text);
+                pAnchor.appendChild(pWrapper);
+                scene.appendChild(pAnchor);
 
-                // FIX 4: Thinner orbit rings to reduce visual clutter
+                // Orbit Rings attached to the Sun Wrapper (so they also float at 1.6m)
                 const orbitRing = document.createElement('a-torus');
                 orbitRing.setAttribute('radius', r_meters.toFixed(3));
                 orbitRing.setAttribute('radius-tubular', '0.005');
                 orbitRing.setAttribute('rotation', '90 0 0'); 
                 orbitRing.setAttribute('material', `color: ${planet.color}; opacity: 0.3; transparent: true; shader: flat;`);
                 
-                sunEntity.appendChild(orbitRing);
+                sunWrapper.appendChild(orbitRing);
             });
         }
     </script>
